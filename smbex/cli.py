@@ -4,8 +4,15 @@ connect, and launch the TUI."""
 from __future__ import annotations
 
 import argparse
+import re
+from pathlib import Path
 
 from smbex import __version__
+
+
+def _safe(host: str) -> str:
+    """A filesystem-safe per-host download subdirectory name."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", host) or "host"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,6 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     ui = parser.add_argument_group("UI")
     ui.add_argument("--no-preload", action="store_true", help="disable folder preloading")
+    ui.add_argument(
+        "--download-dir",
+        metavar="DIR",
+        default="downloads",
+        help="local root for downloads; the remote tree is mirrored under DIR/<host> (default: ./downloads)",
+    )
     return parser
 
 
@@ -106,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
             start_path=getattr(backend, "start_rel", ""),
             preload=not args.no_preload,
             label=args.target,
+            download_root=Path(args.download_dir) / _safe(spec.ssh.host),
         ).run()
         return 0
 
@@ -123,5 +137,10 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - report any connection failure cleanly
         raise SystemExit(f"connection failed: {exc}")
 
-    SmbexApp(Gateway(backend), preload=not args.no_preload, label=args.target).run()
+    SmbexApp(
+        Gateway(backend),
+        preload=not args.no_preload,
+        label=args.target,
+        download_root=Path(args.download_dir) / _safe(smb.host),
+    ).run()
     return 0

@@ -1,15 +1,17 @@
 """The Textual application: a ranger-style, three-column browser.
 
 Layout is Miller columns (parent | current | preview). Navigation mirrors ranger:
-``h/j/k/l`` (+ arrows), ``g``/``G`` for top/bottom. Downloads (``d``), translation
-(``t``) and the preload toggle (``p``) are wired to their keys; ``d``/``t`` are
-reserved no-ops until their phases land. Dark mode is the default.
+``h/j/k/l`` (+ arrows), ``g``/``G`` for top/bottom. Downloads run in the background
+and never block browsing: ``d`` downloads the selected item (a file, or a directory
+recursively), ``a`` grabs every file in the current folder, and ``w`` toggles the
+task panel. ``t`` (translation) is reserved for a later phase. Dark mode is default.
 
-The app owns the gateway lifecycle and renders a ``Browser``. Construct it with a
-started-or-unstarted ``Gateway`` over any backend (real SMB, or a fake in tests).
+The app owns the gateway and download-manager lifecycles and renders a ``Browser``.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -18,8 +20,10 @@ from textual.containers import Horizontal
 from textual.widgets import Footer, Header, Static
 
 from smbex.browser import Browser
+from smbex.download import DownloadManager
 from smbex.gateway import Gateway
 from smbex.ui.columns import Column
+from smbex.ui.downloads import DownloadPanel
 
 
 class SmbexApp(App):
@@ -34,6 +38,14 @@ class SmbexApp(App):
         overflow-y: auto;
     }
     #current { border: round $accent; }
+    #downloads {
+        height: auto;
+        max-height: 40%;
+        border: round $warning;
+        padding: 0 1;
+        overflow-y: auto;
+    }
+    .hidden { display: none; }
     #status {
         height: 1;
         background: $panel;
@@ -50,9 +62,11 @@ class SmbexApp(App):
         Binding("h,left", "leave", "Up"),
         Binding("g", "cursor_top", "Top"),
         Binding("G", "cursor_bottom", "Bottom"),
+        Binding("d", "download", "Download"),
+        Binding("a", "download_all", "Grab all"),
+        Binding("w", "toggle_downloads", "Tasks"),
         Binding("p", "toggle_preload", "Preload"),
-        # Reserved for later phases; visible in the footer, no-ops for now.
-        Binding("d", "noop", "Download"),
+        # Reserved for Phase 7; visible in the footer, no-op for now.
         Binding("t", "noop", "Translate"),
     ]
 
@@ -63,12 +77,18 @@ class SmbexApp(App):
         start_path: str = "",
         preload: bool = False,
         label: str = "",
+        download_root: Path | str = "downloads",
     ):
         super().__init__()
         self._gateway = gateway
         self.browser = Browser(gateway, preload=preload)
+        self._downloads = DownloadManager(gateway, Path(download_root))
         self._start_path = start_path
         self._label = label
+
+    @property
+    def downloads(self) -> DownloadManager:
+        return self._downloads
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -76,12 +96,15 @@ class SmbexApp(App):
             yield Column(id="parent")
             yield Column(id="current")
             yield Column(id="preview")
+        yield DownloadPanel("", id="downloads", classes="hidden")
         yield Static("", id="status")
         yield Footer()
 
     async def on_mount(self) -> None:
         self.theme = "textual-dark"  # dark by default
         await self._gateway.start()
+        self._downloads.on_change = self._on_downloads_change
+        self._downloads.start()
         try:
             await self.browser.load(self._start_path)
         except Exception as exc:  # surface conn/list errors instead of crashing
@@ -90,6 +113,7 @@ class SmbexApp(App):
         await self._refresh()
 
     async def on_unmount(self) -> None:
+        await self._downloads.stop()  # stop before the gateway it depends on
         await self._gateway.stop()
 
     # --- navigation actions ---------------------------------------------------
@@ -128,7 +152,38 @@ class SmbexApp(App):
         self._update_status()
 
     def action_noop(self) -> None:
-        """Reserved binding (download/translate arrive in later phases)."""
+        """Reserved binding (translation arrives in a later phase)."""
+
+    # --- download actions -----------------------------------------------------
+    async def action_download(self) -> None:
+        sel = self.browser.selected
+        if sel is None:
+            return
+        path = self.browser.child_path(sel.name)
+        if sel.is_dir:
+            # Enumeration can be slow over a slow link; do it in the background.
+            self.run_worker(self._downloads.add_dir(path, recursive=True), exclusive=False)
+        else:
+            await self._downloads.add_file(path, sel.size)
+        self._show_downloads()
+
+    async def action_download_all(self) -> None:
+        files = [
+            (self.browser.child_path(e.name), e.size)
+            for e in self.browser.entries
+            if not e.is_dir
+        ]
+        if files:
+            await self._downloads.add_files(files)
+            self._show_downloads()
+
+    def action_toggle_downloads(self) -> None:
+        self.query_one("#downloads", DownloadPanel).toggle_class("hidden")
+        self._refresh_downloads()
+
+    def _show_downloads(self) -> None:
+        self.query_one("#downloads", DownloadPanel).remove_class("hidden")
+        self._refresh_downloads()
 
     # --- rendering ------------------------------------------------------------
     async def _refresh(self) -> None:
@@ -145,7 +200,17 @@ class SmbexApp(App):
             preview_col.show_file(browser.selected)
         else:
             preview_col.show(preview)
+        self._refresh_downloads()
+
+    def _refresh_downloads(self) -> None:
+        self.query_one("#downloads", DownloadPanel).render_items(self._downloads.items)
         self._update_status()
+
+    def _on_downloads_change(self) -> None:
+        try:
+            self._refresh_downloads()
+        except Exception:
+            pass  # widgets may be gone during teardown
 
     def _update_status(self) -> None:
         browser = self.browser
@@ -155,6 +220,10 @@ class SmbexApp(App):
             f" {self._label or 'smbex'} │ /{browser.path} │ "
             f"preload:{preload} │ cache:{browser.cache.hits}/{total}"
         )
+        items = self._downloads.items
+        if items:
+            finished = sum(1 for i in items if i.status in ("done", "skipped"))
+            text += f" │ dl:{finished}/{len(items)}"
         self.query_one("#status", Static).update(text)
 
     def _status_error(self, exc: Exception) -> None:

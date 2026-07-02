@@ -80,6 +80,30 @@ class Gateway:
             priority, lambda: b"".join(self._backend.open_read(path))
         )
 
+    async def read_range(
+        self, path: str, offset: int, length: int, priority: int = Priority.DOWNLOAD
+    ) -> bytes:
+        """Read up to ``length`` bytes from ``offset`` as one low-priority job.
+
+        Downloads call this per chunk so that between chunks a queued browse job
+        (higher priority) is served first — the cooperative throttle that keeps
+        browsing responsive during a transfer.
+        """
+
+        def _do() -> bytes:
+            buf = bytearray()
+            gen = self._backend.open_read(path, offset)
+            try:
+                for chunk in gen:
+                    buf += chunk
+                    if len(buf) >= length:
+                        break
+            finally:
+                gen.close()  # run the backend generator's finally -> close handle
+            return bytes(buf[:length])
+
+        return await self._submit(priority, _do)
+
     async def stop(self) -> None:
         if self._worker is not None:
             self._worker.cancel()

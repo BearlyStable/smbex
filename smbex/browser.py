@@ -110,6 +110,9 @@ class Browser:
             return await self.listdir(_join(self.path, sel.name))
         return None
 
+    def child_path(self, name: str) -> str:
+        return _join(self.path, name)
+
     def parent_cursor(self, parent_entries: list[DirEntry]) -> int | None:
         name = _base(self.path)
         for i, entry in enumerate(parent_entries):

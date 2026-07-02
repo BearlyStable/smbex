@@ -26,6 +26,9 @@ class FakeBackend:
         self.list_calls: list[str] = []
         self.exec_order: list[str] = []
         self.gates: dict[str, threading.Event] = {}
+        # Cross-operation event log + per-path read gates, for the throttle test.
+        self.events: list[str] = []
+        self.read_gates: dict[str, threading.Event] = {}
         self.closed = False
 
     @staticmethod
@@ -54,6 +57,7 @@ class FakeBackend:
         if gate is not None:  # block until the test releases us
             gate.wait()
         self.exec_order.append(path)
+        self.events.append(f"list:{path}")
         node = self._resolve(path)
         if not isinstance(node, dict):
             raise NotADirectoryError(path)
@@ -68,6 +72,11 @@ class FakeBackend:
         node = self._resolve(path)
         if isinstance(node, dict):
             raise IsADirectoryError(path)
+        self.events.append(f"read-start:{path}@{offset}")
+        gate = self.read_gates.get(path)
+        if gate is not None:  # block until the test releases this read
+            gate.wait()
+        self.events.append(f"read:{path}@{offset}")
         data = node[offset:]
         for i in range(0, len(data), chunk) or [0]:
             yield data[i : i + chunk]

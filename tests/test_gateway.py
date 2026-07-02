@@ -53,3 +53,37 @@ async def test_browse_preempts_download():
         await asyncio.gather(blocked, *futs)
 
     assert backend.exec_order == ["block", "b", "p", "d2"]
+
+
+async def test_browse_preempts_between_download_chunks():
+    """A browse request issued mid-download is served before the next chunk read.
+
+    This is the throttle: downloads read one chunk per low-priority job, so a
+    higher-priority browse queued while a chunk is in flight runs first."""
+    from smbex.download import CHUNK
+
+    backend = FakeBackend({"big": b"x" * (2 * CHUNK), "marker": {}})
+    gate = threading.Event()
+    backend.read_gates["big"] = gate  # hold the first download chunk
+
+    async with Gateway(backend) as gw:
+        chunk1 = asyncio.ensure_future(
+            gw.read_range("big", 0, CHUNK, priority=Priority.DOWNLOAD)
+        )
+        for _ in range(200):  # wait until the worker is blocked inside the first read
+            if "read-start:big@0" in backend.events:
+                break
+            await asyncio.sleep(0.005)
+
+        # Queue a browse and the next download chunk while the first read is stuck.
+        browse = asyncio.ensure_future(gw.list("marker", priority=Priority.BROWSE))
+        chunk2 = asyncio.ensure_future(
+            gw.read_range("big", CHUNK, CHUNK, priority=Priority.DOWNLOAD)
+        )
+        await asyncio.sleep(0.03)
+        gate.set()
+        await asyncio.gather(chunk1, chunk2, browse)
+
+    assert backend.events.index("list:marker") < backend.events.index(
+        f"read:big@{CHUNK}"
+    )

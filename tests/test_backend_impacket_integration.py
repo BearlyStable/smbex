@@ -46,3 +46,19 @@ def test_list_dir_and_read_file(smb_server):
         assert "inner.bin" in inner
     finally:
         backend.close()
+
+
+async def test_recursive_download_over_real_smb(smb_server, tmp_path):
+    from smbex.download import DownloadManager
+    from smbex.gateway import Gateway
+
+    share = smb_server["share"]
+    async with Gateway(_connect(smb_server)) as gw:  # gateway closes the backend
+        mgr = DownloadManager(gw, tmp_path)
+        mgr.start()
+        await mgr.add_dir(share, recursive=True)
+        await mgr.join()
+        await mgr.stop()
+
+    assert (tmp_path / share / "hello.txt").read_bytes() == b"hello smb"
+    assert (tmp_path / share / "sub" / "inner.bin").read_bytes() == b"\x00\x01\x02inner"

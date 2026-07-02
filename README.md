@@ -54,6 +54,10 @@ python3 -m smbex -i ~/.ssh/id_ed25519 'ssh://user@host:2222/var/log'
 ```
 
 Navigate like ranger: `h/j/k/l` (or arrows), `g`/`G` for top/bottom, `q` to quit.
+Download in the background: `d` (selected file, or a folder recursively), `a` (all
+files in the current folder), `w` (show/hide the task panel). Downloads mirror the
+remote tree under `DIR/<host>` (`--download-dir`, default `./downloads`), resume
+partial files, skip complete ones, and yield to browsing so navigation stays snappy.
 
 ## Try it out (local demo, no root)
 

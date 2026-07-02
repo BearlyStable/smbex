@@ -32,11 +32,16 @@ a slow connection. Target features (full list — most are still ahead):
 | 1 | SMB connect/auth + backend abstraction + gateway + cache + tests | **done** |
 | 2 | Ranger-style browser UI wired to cache + tests | **done** |
 | 3 | SSH/SFTP backend (paramiko) + tests | **done** |
-| 4 | Background downloads (SMB+SSH) + local mirror + progress UI | **next** |
-| 5 | Prioritization & throttling (browse preempts downloads) | handed off |
-| 6 | Preloader (surrounding folders, toggle) | handed off |
+| 4 | Background downloads (SMB+SSH) + local mirror + progress UI | **done** |
+| 5 | Prioritization & throttling (browse preempts downloads) | **done** (core; see note) |
+| 6 | Preloader (surrounding folders, toggle) | **next** |
 | 7 | Offline translation (argostranslate) + toggle | handed off |
 | 8 | Polish (help, reconnect, config, theming) | handed off |
+
+> Phase 5 note: the throttle (browse preempts an in-flight download between chunks)
+> is implemented and tested (`test_browse_preempts_between_download_chunks`). What
+> remains is optional: an SSH second channel so a big transfer doesn't share the
+> browse channel, and a live bandwidth/ETA display.
 
 **Definition of done for any feature: its tests pass AND the code is committed.**
 Commit once per completed phase (or smaller), with green tests in that commit.
@@ -121,12 +126,13 @@ smbex/
   gateway.py             ✓ async priority-queue gateway (browse preempts download)
   cache.py               ✓ in-memory, session-only listing cache
   browser.py             ✓ ranger navigation controller (cache-backed, cursor memory)
-  download.py            Phase 4 — DownloadManager
+  download.py            ✓ background DownloadManager (resume/skip, mirror, throttled)
   preload.py             Phase 6 — Preloader
   translate.py           Phase 7 — Translator (lazy argostranslate)
   ui/
     app.py               ✓ Textual ranger UI (parent|current|preview, dark default)
     columns.py           ✓ Miller-column widget
+    downloads.py         ✓ download/task panel (progress bars)
 tests/                   pytest; FakeBackend + live SMB server fixtures
 ```
 

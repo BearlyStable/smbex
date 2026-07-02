@@ -1,0 +1,85 @@
+"""DownloadManager: local mirror layout, current-folder vs recursive enumeration,
+and the resume / skip / overwrite policies for files already present locally."""
+
+from __future__ import annotations
+
+from smbex.backend.fake_backend import FakeBackend
+from smbex.download import DownloadManager
+from smbex.gateway import Gateway
+
+TREE = {
+    "share": {
+        "readme.txt": b"hello world",  # 11 bytes
+        "docs": {"a.txt": b"aaaa", "b.txt": b"bbbbbb"},
+        "pics": {"deep": {"c.bin": b"\x00\x01\x02\x03"}},
+    },
+}
+
+
+async def _drain(mgr: DownloadManager) -> None:
+    mgr.start()
+    await mgr.join()
+    await mgr.stop()
+
+
+async def test_single_file_mirrors_remote_path(tmp_path):
+    async with Gateway(FakeBackend(TREE)) as gw:
+        mgr = DownloadManager(gw, tmp_path)
+        await mgr.add_file("share/readme.txt", 11)
+        await _drain(mgr)
+    assert (tmp_path / "share" / "readme.txt").read_bytes() == b"hello world"
+
+
+async def test_current_folder_files_are_not_recursive(tmp_path):
+    async with Gateway(FakeBackend(TREE)) as gw:
+        mgr = DownloadManager(gw, tmp_path)
+        await mgr.add_files([("share/readme.txt", 11)])  # what "grab all here" enqueues
+        await _drain(mgr)
+    assert (tmp_path / "share" / "readme.txt").exists()
+    assert not (tmp_path / "share" / "docs").exists()
+
+
+async def test_recursive_download_mirrors_whole_tree(tmp_path):
+    async with Gateway(FakeBackend(TREE)) as gw:
+        mgr = DownloadManager(gw, tmp_path)
+        await mgr.add_dir("share", recursive=True)
+        await _drain(mgr)
+    base = tmp_path / "share"
+    assert (base / "readme.txt").read_bytes() == b"hello world"
+    assert (base / "docs" / "a.txt").read_bytes() == b"aaaa"
+    assert (base / "docs" / "b.txt").read_bytes() == b"bbbbbb"
+    assert (base / "pics" / "deep" / "c.bin").read_bytes() == b"\x00\x01\x02\x03"
+
+
+async def test_resume_completes_a_partial_file(tmp_path):
+    dest = tmp_path / "share" / "readme.txt"
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(b"hello")  # correct 5-byte prefix of 11
+    async with Gateway(FakeBackend(TREE)) as gw:
+        mgr = DownloadManager(gw, tmp_path, exists_policy="resume")
+        item = await mgr.add_file("share/readme.txt", 11)
+        await _drain(mgr)
+    assert dest.read_bytes() == b"hello world"
+    assert item.status == "done"
+
+
+async def test_skip_already_complete_file(tmp_path):
+    dest = tmp_path / "share" / "readme.txt"
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(b"hello world")
+    async with Gateway(FakeBackend(TREE)) as gw:
+        mgr = DownloadManager(gw, tmp_path, exists_policy="resume")
+        item = await mgr.add_file("share/readme.txt", 11)
+        await _drain(mgr)
+    assert item.status == "skipped"
+
+
+async def test_overwrite_replaces_existing(tmp_path):
+    dest = tmp_path / "share" / "readme.txt"
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(b"XXXXXXXXXXX")  # wrong content, same length
+    async with Gateway(FakeBackend(TREE)) as gw:
+        mgr = DownloadManager(gw, tmp_path, exists_policy="overwrite")
+        await mgr.add_file("share/readme.txt", 11)
+        await _drain(mgr)
+    assert dest.read_bytes() == b"hello world"
