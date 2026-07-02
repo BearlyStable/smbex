@@ -20,3 +20,9 @@ def test_auth_flags():
     assert args.hashes == "LM:NT"
     assert args.kerberos is True
     assert args.no_pass is True
+
+
+def test_ssh_host_key_flags():
+    args = build_parser().parse_args(["ssh://user@host", "--strict-host-keys"])
+    assert args.strict_host_keys is True
+    assert args.ignore_host_keys is False

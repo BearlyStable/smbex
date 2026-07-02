@@ -47,6 +47,10 @@ python3 -m venv .venv
 python3 -m smbex 'DOMAIN/user:password@host'
 python3 -m smbex -H :NThash --no-pass 'DOMAIN/user@host'          # pass-the-hash
 python3 -m smbex -k --dc-ip 10.0.0.1 'DOMAIN/user@host.domain'    # Kerberos (ccache)
+
+# SSH/SFTP (host keys auto-accepted by default; --strict-host-keys to verify):
+python3 -m smbex 'ssh://user@host'
+python3 -m smbex -i ~/.ssh/id_ed25519 'ssh://user@host:2222/var/log'
 ```
 
 Navigate like ranger: `h/j/k/l` (or arrows), `g`/`G` for top/bottom, `q` to quit.

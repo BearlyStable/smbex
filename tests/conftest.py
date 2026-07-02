@@ -91,3 +91,102 @@ def make_app():
         return SmbexApp(Gateway(backend), **kwargs)
 
     return _make
+
+
+@pytest.fixture(scope="session")
+def sftp_server(tmp_path_factory):
+    """An in-process paramiko SFTP server on localhost serving a temp tree.
+
+    Read-only: enough for the SSH backend's browse + download paths. Accepts any
+    credentials. Skips cleanly if paramiko can't stand it up."""
+    try:
+        import os
+        import socket
+        import threading
+
+        import paramiko
+    except Exception as exc:  # pragma: no cover
+        pytest.skip(f"paramiko unavailable: {exc}")
+
+    root = tmp_path_factory.mktemp("sftproot")
+    (root / "readme.txt").write_bytes(b"hello ssh")
+    logs = root / "logs"
+    logs.mkdir()
+    (logs / "app.log").write_bytes(b"line1\nline2\n")
+
+    host_key = paramiko.RSAKey.generate(2048)
+
+    class _Server(paramiko.ServerInterface):
+        def check_auth_password(self, username, password):
+            return paramiko.AUTH_SUCCESSFUL
+
+        def check_auth_publickey(self, username, key):
+            return paramiko.AUTH_SUCCESSFUL
+
+        def get_allowed_auths(self, username):
+            return "password,publickey"
+
+        def check_channel_request(self, kind, chanid):
+            if kind == "session":
+                return paramiko.OPEN_SUCCEEDED
+            return paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
+
+    class _FS(paramiko.SFTPServerInterface):
+        def __init__(self, server, *largs, **kwargs):
+            super().__init__(server)
+
+        def _real(self, path):
+            return os.path.join(str(root), path.lstrip("/"))
+
+        def list_folder(self, path):
+            out = []
+            for name in os.listdir(self._real(path)):
+                attr = paramiko.SFTPAttributes.from_stat(os.stat(os.path.join(self._real(path), name)))
+                attr.filename = name
+                out.append(attr)
+            return out
+
+        def stat(self, path):
+            try:
+                return paramiko.SFTPAttributes.from_stat(os.stat(self._real(path)))
+            except OSError as exc:
+                return paramiko.SFTPServer.convert_errno(exc.errno)
+
+        def lstat(self, path):
+            try:
+                return paramiko.SFTPAttributes.from_stat(os.lstat(self._real(path)))
+            except OSError as exc:
+                return paramiko.SFTPServer.convert_errno(exc.errno)
+
+        def open(self, path, flags, attr):
+            try:
+                fileobj = open(self._real(path), "rb")
+            except OSError as exc:
+                return paramiko.SFTPServer.convert_errno(exc.errno)
+            handle = paramiko.SFTPHandle(flags)
+            handle.readfile = fileobj
+            return handle
+
+    listen = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listen.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listen.bind(("127.0.0.1", 0))
+    listen.listen(5)
+    port = listen.getsockname()[1]
+
+    def serve():
+        while True:
+            try:
+                conn, _ = listen.accept()
+            except OSError:
+                break
+            transport = paramiko.Transport(conn)
+            transport.add_server_key(host_key)
+            transport.set_subsystem_handler("sftp", paramiko.SFTPServer, _FS)
+            try:
+                transport.start_server(server=_Server())
+            except Exception:
+                pass
+
+    threading.Thread(target=serve, daemon=True).start()
+    yield {"host": "127.0.0.1", "port": port, "root": root}
+    listen.close()

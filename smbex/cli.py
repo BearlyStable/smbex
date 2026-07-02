@@ -37,10 +37,41 @@ def build_parser() -> argparse.ArgumentParser:
 
     ssh = parser.add_argument_group("SSH auth")
     ssh.add_argument("-i", "--identity", metavar="KEYFILE", help="SSH private key file")
+    ssh.add_argument(
+        "--strict-host-keys",
+        action="store_true",
+        help="verify SSH host keys against ~/.ssh/known_hosts (default: accept & remember)",
+    )
+    ssh.add_argument(
+        "--ignore-host-keys",
+        action="store_true",
+        help="never check or store SSH host keys",
+    )
 
     ui = parser.add_argument_group("UI")
     ui.add_argument("--no-preload", action="store_true", help="disable folder preloading")
     return parser
+
+
+def _connect_ssh(ssh):
+    """Connect over SSH, prompting once for a password if key/agent auth fails."""
+    from smbex.backend.ssh_backend import SshBackend
+
+    try:
+        return SshBackend.connect(ssh)
+    except Exception as exc:  # noqa: BLE001
+        import paramiko
+
+        if isinstance(exc, paramiko.AuthenticationException) and not ssh.password:
+            import getpass
+
+            who = ssh.username or getpass.getuser()
+            ssh.password = getpass.getpass(f"Password for {who}@{ssh.host}: ")
+            try:
+                return SshBackend.connect(ssh)
+            except Exception as retry_exc:  # noqa: BLE001
+                raise SystemExit(f"connection failed: {retry_exc}")
+        raise SystemExit(f"connection failed: {exc}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,6 +82,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from smbex.auth import Proto, make_conn_spec
 
+    policy = "strict" if args.strict_host_keys else "ignore" if args.ignore_host_keys else "auto"
     spec = make_conn_spec(
         args.target,
         hashes=args.hashes,
@@ -61,10 +93,21 @@ def main(argv: list[str] | None = None) -> int:
         target_ip=args.target_ip,
         port=args.port,
         identity=args.identity,
+        known_hosts_policy=policy,
     )
 
+    from smbex.gateway import Gateway
+    from smbex.ui.app import SmbexApp
+
     if spec.proto is Proto.SSH:
-        raise SystemExit("ssh:// targets arrive in Phase 3; SMB targets work today.")
+        backend = _connect_ssh(spec.ssh)
+        SmbexApp(
+            Gateway(backend),
+            start_path=getattr(backend, "start_rel", ""),
+            preload=not args.no_preload,
+            label=args.target,
+        ).run()
+        return 0
 
     smb = spec.smb
     assert smb is not None
@@ -74,8 +117,6 @@ def main(argv: list[str] | None = None) -> int:
         smb.password = getpass.getpass(f"Password for {smb.username or 'guest'}: ")
 
     from smbex.backend.impacket_backend import ImpacketBackend
-    from smbex.gateway import Gateway
-    from smbex.ui.app import SmbexApp
 
     try:
         backend = ImpacketBackend.connect(smb)

@@ -31,8 +31,8 @@ a slow connection. Target features (full list — most are still ahead):
 | 0 | Scaffold, packaging, venv, dark-mode app boots, smoke tests | **done** |
 | 1 | SMB connect/auth + backend abstraction + gateway + cache + tests | **done** |
 | 2 | Ranger-style browser UI wired to cache + tests | **done** |
-| 3 | SSH/SFTP backend (paramiko) + tests | **next** |
-| 4 | Background downloads (SMB+SSH) + local mirror + progress UI | handed off |
+| 3 | SSH/SFTP backend (paramiko) + tests | **done** |
+| 4 | Background downloads (SMB+SSH) + local mirror + progress UI | **next** |
 | 5 | Prioritization & throttling (browse preempts downloads) | handed off |
 | 6 | Preloader (surrounding folders, toggle) | handed off |
 | 7 | Offline translation (argostranslate) + toggle | handed off |
@@ -117,7 +117,7 @@ smbex/
     base.py              ✓ Backend protocol, DirEntry
     impacket_backend.py  ✓ SMB via impacket SMBConnection
     fake_backend.py      ✓ in-memory tree for tests
-    ssh_backend.py       Phase 3 — SSH/SFTP via paramiko
+    ssh_backend.py       ✓ SSH/SFTP via paramiko (TOFU host keys; unified path rooted at /)
   gateway.py             ✓ async priority-queue gateway (browse preempts download)
   cache.py               ✓ in-memory, session-only listing cache
   browser.py             ✓ ranger navigation controller (cache-backed, cursor memory)

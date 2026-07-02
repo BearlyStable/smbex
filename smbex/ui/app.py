@@ -56,10 +56,18 @@ class SmbexApp(App):
         Binding("t", "noop", "Translate"),
     ]
 
-    def __init__(self, gateway: Gateway, *, preload: bool = False, label: str = ""):
+    def __init__(
+        self,
+        gateway: Gateway,
+        *,
+        start_path: str = "",
+        preload: bool = False,
+        label: str = "",
+    ):
         super().__init__()
         self._gateway = gateway
         self.browser = Browser(gateway, preload=preload)
+        self._start_path = start_path
         self._label = label
 
     def compose(self) -> ComposeResult:
@@ -75,7 +83,7 @@ class SmbexApp(App):
         self.theme = "textual-dark"  # dark by default
         await self._gateway.start()
         try:
-            await self.browser.load("")
+            await self.browser.load(self._start_path)
         except Exception as exc:  # surface conn/list errors instead of crashing
             self._status_error(exc)
             return
