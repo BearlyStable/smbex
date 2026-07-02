@@ -27,7 +27,13 @@ def build_parser() -> argparse.ArgumentParser:
     smb.add_argument("--aes-key", default="", metavar="HEX", help="Kerberos AES key (implies -k)")
     smb.add_argument("--dc-ip", metavar="IP", help="domain controller / KDC address")
     smb.add_argument("--target-ip", metavar="IP", help="address to dial if host is a name")
-    smb.add_argument("--port", type=int, choices=(139, 445), default=445)
+    smb.add_argument(
+        "--port",
+        type=int,
+        default=445,
+        metavar="PORT",
+        help="SMB port (default 445; 139 legacy; any port for tunneled/pivoted SMB)",
+    )
 
     ssh = parser.add_argument_group("SSH auth")
     ssh.add_argument("-i", "--identity", metavar="KEYFILE", help="SSH private key file")

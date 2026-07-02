@@ -43,7 +43,26 @@ python3 -m venv .venv
 ## Run
 
 ```sh
-python3 -m smbex            # (connect flow lands in Phase 2)
+# SMB, impacket-smbclient-style target (password is prompted if omitted):
+python3 -m smbex 'DOMAIN/user:password@host'
+python3 -m smbex -H :NThash --no-pass 'DOMAIN/user@host'          # pass-the-hash
+python3 -m smbex -k --dc-ip 10.0.0.1 'DOMAIN/user@host.domain'    # Kerberos (ccache)
+```
+
+Navigate like ranger: `h/j/k/l` (or arrows), `g`/`G` for top/bottom, `q` to quit.
+
+## Try it out (local demo, no root)
+
+Terminal 1 — start a throwaway SMB server with sample files on a high port:
+
+```sh
+python3 scripts/demo_server.py
+```
+
+Terminal 2 — connect the client (any username/password is accepted):
+
+```sh
+python3 -m smbex 'demo:demo@127.0.0.1' --port 4455
 ```
 
 ## Test
