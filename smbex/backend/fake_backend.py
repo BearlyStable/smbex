@@ -26,6 +26,11 @@ class _FakeRemoteFile:
         self._data = data
 
     def read(self, offset: int, length: int) -> bytes:
+        self._backend.events.append(f"read-start:{self._path}@{offset}")
+        gate = self._backend.read_gates.get(self._path)
+        if gate is not None:  # let a test hold a chunk to exercise preemption
+            gate.wait()
+        self._backend.events.append(f"read:{self._path}@{offset}")
         return self._data[offset : offset + length]
 
     def close(self) -> None:

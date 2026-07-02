@@ -100,3 +100,38 @@ async def test_multi_chunk_file_is_opened_once(tmp_path):
     assert (tmp_path / "share" / "big.bin").read_bytes() == data
     assert backend.events.count("open:share/big.bin") == 1
     assert backend.events.count("close:share/big.bin") == 1
+
+
+async def test_browse_preempts_an_active_download(tmp_path):
+    """While a large file is downloading, a browse listing is served before the
+    download's next chunk — you can keep navigating during a big transfer, even
+    though the remote file stays open across chunks."""
+    import asyncio
+    import threading
+
+    from smbex.download import CHUNK
+    from smbex.gateway import Priority
+
+    backend = FakeBackend({"big": b"x" * (2 * CHUNK), "marker": {}})
+    gate = threading.Event()
+    backend.read_gates["big"] = gate  # hold the download's first chunk read
+
+    async with Gateway(backend) as gw:
+        mgr = DownloadManager(gw, tmp_path)
+        mgr.start()
+        await mgr.add_file("big", 2 * CHUNK)
+
+        for _ in range(200):  # wait until the first chunk read is in flight
+            if "read-start:big@0" in backend.events:
+                break
+            await asyncio.sleep(0.005)
+
+        browse = asyncio.ensure_future(gw.list("marker", priority=Priority.BROWSE))
+        await asyncio.sleep(0.03)
+        gate.set()  # release the download
+        await browse
+        await mgr.join()
+        await mgr.stop()
+
+    # the browse listing ran before the download's SECOND chunk
+    assert backend.events.index("list:marker") < backend.events.index(f"read:big@{CHUNK}")
