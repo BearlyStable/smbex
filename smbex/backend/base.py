@@ -25,6 +25,17 @@ class DirEntry:
 
 
 @runtime_checkable
+class RemoteFile(Protocol):
+    """An opened remote file for repeated ranged reads (used by downloads)."""
+
+    def read(self, offset: int, length: int) -> bytes:
+        ...
+
+    def close(self) -> None:
+        ...
+
+
+@runtime_checkable
 class Backend(Protocol):
     def roots(self) -> list[DirEntry]:
         """Top-level entries: SMB shares, or the SSH start directory listing."""
@@ -40,6 +51,11 @@ class Backend(Protocol):
 
     def open_read(self, path: str, offset: int = 0) -> Iterator[bytes]:
         """Yield the file's bytes from ``offset`` in chunks (for streaming reads)."""
+        ...
+
+    def open_file(self, path: str) -> "RemoteFile":
+        """Open a remote file once for many ranged reads. Downloads keep this open
+        across chunks instead of reopening per chunk (fewer PDUs / audit events)."""
         ...
 
     def close(self) -> None:

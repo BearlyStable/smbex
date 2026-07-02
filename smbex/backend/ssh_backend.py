@@ -19,6 +19,20 @@ from smbex.auth import SshAuth
 from smbex.backend.base import DirEntry
 
 
+class _SftpFile:
+    """An open SFTP file: one OPEN, then many seek+read ranges over the channel."""
+
+    def __init__(self, handle):
+        self._handle = handle
+
+    def read(self, offset: int, length: int) -> bytes:
+        self._handle.seek(offset)
+        return self._handle.read(length) or b""
+
+    def close(self) -> None:
+        self._handle.close()
+
+
 class SshBackend:
     def __init__(self, sftp, client=None, start_rel: str = ""):
         self._sftp = sftp
@@ -116,6 +130,9 @@ class SshBackend:
                 yield data
         finally:
             handle.close()
+
+    def open_file(self, path: str) -> _SftpFile:
+        return _SftpFile(self._sftp.open(self._server_path(path), "rb"))
 
     def close(self) -> None:
         for obj in (self._sftp, self._client):

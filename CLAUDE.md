@@ -126,7 +126,7 @@ smbex/
   gateway.py             ✓ async priority-queue gateway (browse preempts download)
   cache.py               ✓ in-memory, session-only listing cache
   browser.py             ✓ ranger navigation controller (cache-backed, cursor memory)
-  download.py            ✓ background DownloadManager (resume/skip, mirror, throttled)
+  download.py            ✓ background DownloadManager (resume/skip, mirror, throttled; one handle/file)
   preload.py             Phase 6 — Preloader
   translate.py           Phase 7 — Translator (lazy argostranslate)
   ui/
@@ -170,5 +170,12 @@ tests/                   pytest; FakeBackend + live SMB server fixtures
   downloads + preload). Rust would mean a single static binary but sacrifice auth
   breadth and offline translation.
 - **Protocol-generic backend** so SMB and SSH share the gateway, cache, and UI.
+- **Downloads open each remote file once** (`Backend.open_file` → `RemoteFile`),
+  then read successive ranges as separate low-priority jobs. Still preemptible by
+  browsing, but the SMB wire/audit footprint (one CREATE/CLOSE + TREE_CONNECT per
+  file) stays like a normal client instead of one cycle per 256 KB chunk.
+- **Folder sizes aren't shown** because neither SMB nor SFTP can report a
+  directory's recursive size without walking it; if added, do it on demand at low
+  priority and cache it (SSH could shell out to `du -sb`), never eagerly per listing.
 - **argostranslate is pip/pipx-only on Kali** — the one dependency outside apt;
   keep translation optional so the apt-only install stays fully functional.

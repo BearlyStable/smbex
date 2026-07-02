@@ -13,6 +13,28 @@ from smbex.auth import SmbAuth, smb_kerberos_kwargs, smb_login_kwargs
 from smbex.backend.base import DirEntry
 
 
+class _SmbFile:
+    """An open SMB file: one tree-connect + open, then many ranged reads.
+
+    This keeps a download's wire/audit footprint close to a normal SMB client
+    (one CREATE/CLOSE and one TREE_CONNECT/DISCONNECT per file), instead of one
+    per chunk."""
+
+    def __init__(self, conn, tid, fid):
+        self._conn = conn
+        self._tid = tid
+        self._fid = fid
+
+    def read(self, offset: int, length: int) -> bytes:
+        return self._conn.readFile(self._tid, self._fid, offset, length, singleCall=False) or b""
+
+    def close(self) -> None:
+        try:
+            self._conn.closeFile(self._tid, self._fid)
+        finally:
+            self._conn.disconnectTree(self._tid)
+
+
 class ImpacketBackend:
     def __init__(self, conn):
         self._conn = conn
@@ -91,6 +113,12 @@ class ImpacketBackend:
         finally:
             self._conn.closeFile(tid, fid)
             self._conn.disconnectTree(tid)
+
+    def open_file(self, path: str) -> _SmbFile:
+        share, sub = self._split(path)
+        tid = self._conn.connectTree(share)
+        fid = self._conn.openFile(tid, sub.replace("/", "\\"))
+        return _SmbFile(self._conn, tid, fid)
 
     def close(self) -> None:
         for teardown in (self._conn.logoff, self._conn.close):

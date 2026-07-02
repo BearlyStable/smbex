@@ -19,6 +19,19 @@ from smbex.backend.base import DirEntry
 Node = "dict | bytes"
 
 
+class _FakeRemoteFile:
+    def __init__(self, backend: "FakeBackend", path: str, data: bytes):
+        self._backend = backend
+        self._path = path
+        self._data = data
+
+    def read(self, offset: int, length: int) -> bytes:
+        return self._data[offset : offset + length]
+
+    def close(self) -> None:
+        self._backend.events.append(f"close:{self._path}")
+
+
 class FakeBackend:
     def __init__(self, tree: dict):
         self._tree = tree
@@ -80,6 +93,13 @@ class FakeBackend:
         data = node[offset:]
         for i in range(0, len(data), chunk) or [0]:
             yield data[i : i + chunk]
+
+    def open_file(self, path: str) -> "_FakeRemoteFile":
+        node = self._resolve(path)
+        if isinstance(node, dict):
+            raise IsADirectoryError(path)
+        self.events.append(f"open:{path}")
+        return _FakeRemoteFile(self, path, node)
 
     def close(self) -> None:
         self.closed = True

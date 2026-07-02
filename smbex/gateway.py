@@ -104,6 +104,20 @@ class Gateway:
 
         return await self._submit(priority, _do)
 
+    async def open_file(self, path: str, priority: int = Priority.DOWNLOAD):
+        """Open a remote file handle (one low-priority job)."""
+        return await self._submit(priority, lambda: self._backend.open_file(path))
+
+    async def read_file(
+        self, handle, offset: int, length: int, priority: int = Priority.DOWNLOAD
+    ) -> bytes:
+        """Read a range from an already-open handle as one low-priority job, so a
+        queued browse still runs between a download's chunks."""
+        return await self._submit(priority, lambda: handle.read(offset, length))
+
+    async def close_file(self, handle, priority: int = Priority.DOWNLOAD) -> None:
+        await self._submit(priority, handle.close)
+
     async def stop(self) -> None:
         if self._worker is not None:
             self._worker.cancel()

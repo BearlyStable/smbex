@@ -155,18 +155,25 @@ class DownloadManager:
         self._notify()
 
         mode = "ab" if existing else "wb"
-        with open(item.local_path, mode) as handle:
-            offset = existing
-            while True:
-                chunk = await self.gateway.read_range(
-                    item.remote_path, offset, CHUNK, priority=Priority.DOWNLOAD
-                )
-                if not chunk:
-                    break
-                handle.write(chunk)
-                offset += len(chunk)
-                item.downloaded = offset
-                self._notify()
-                if item.size and offset >= item.size:
-                    break
+        # Open the remote file once and read successive ranges — each range is its
+        # own low-priority job (so browsing still preempts), but we don't reopen
+        # per chunk. That keeps the wire/audit footprint like a normal client.
+        remote = await self.gateway.open_file(item.remote_path, priority=Priority.DOWNLOAD)
+        try:
+            with open(item.local_path, mode) as local:
+                offset = existing
+                while True:
+                    chunk = await self.gateway.read_file(
+                        remote, offset, CHUNK, priority=Priority.DOWNLOAD
+                    )
+                    if not chunk:
+                        break
+                    local.write(chunk)
+                    offset += len(chunk)
+                    item.downloaded = offset
+                    self._notify()
+                    if item.size and offset >= item.size:
+                        break
+        finally:
+            await self.gateway.close_file(remote, priority=Priority.DOWNLOAD)
         item.status = "done"

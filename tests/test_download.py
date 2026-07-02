@@ -83,3 +83,20 @@ async def test_overwrite_replaces_existing(tmp_path):
         await mgr.add_file("share/readme.txt", 11)
         await _drain(mgr)
     assert dest.read_bytes() == b"hello world"
+
+
+async def test_multi_chunk_file_is_opened_once(tmp_path):
+    """A file spanning several chunks is opened/closed once, not per chunk
+    (keeps the SMB wire/audit footprint like a normal client)."""
+    from smbex.download import CHUNK
+
+    data = b"y" * (3 * CHUNK + 100)  # 4 read_file calls
+    backend = FakeBackend({"share": {"big.bin": data}})
+    async with Gateway(backend) as gw:
+        mgr = DownloadManager(gw, tmp_path)
+        await mgr.add_file("share/big.bin", len(data))
+        await _drain(mgr)
+
+    assert (tmp_path / "share" / "big.bin").read_bytes() == data
+    assert backend.events.count("open:share/big.bin") == 1
+    assert backend.events.count("close:share/big.bin") == 1

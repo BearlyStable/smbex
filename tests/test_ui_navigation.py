@@ -62,3 +62,14 @@ async def test_current_column_renders_selection(make_app):
         current = app.query_one("#current", Column)
         assert "share" in [e.name for e in current.shown]
         await pilot.press("q")
+
+
+async def test_listing_shows_file_sizes(make_app):
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.press("j")  # select "share"
+        await pilot.press("l")  # enter it
+        current = app.query_one("#current", Column)
+        # readme.txt is b"hello" (5 bytes) -> shown as "5B" in the listing
+        assert "5B" in current.rendered_text
+        await pilot.press("q")

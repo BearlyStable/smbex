@@ -50,3 +50,21 @@ async def test_browse_ssh_through_the_tui(sftp_server):
         assert app.browser.path.endswith("logs")
         assert "app.log" in [e.name for e in app.browser.entries]
         await pilot.press("q")
+
+
+async def test_recursive_download_over_real_ssh(sftp_server, tmp_path):
+    from smbex.download import DownloadManager
+    from smbex.gateway import Gateway
+
+    auth = build_ssh_auth(
+        f"ssh://tester:secret@{sftp_server['host']}:{sftp_server['port']}"
+    )
+    async with Gateway(SshBackend.connect(auth)) as gw:  # exercises SSH open_file
+        mgr = DownloadManager(gw, tmp_path)
+        mgr.start()
+        await mgr.add_dir("", recursive=True)  # from the server root
+        await mgr.join()
+        await mgr.stop()
+
+    assert (tmp_path / "readme.txt").read_bytes() == b"hello ssh"
+    assert (tmp_path / "logs" / "app.log").read_bytes() == b"line1\nline2\n"
