@@ -1,0 +1,16 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+# Local mirror of downloaded remote files
+downloads/
+# Offline translation model packages
+*.argosmodel
+.DS_Store
+# Local Claude Code settings (permissions etc.) — machine-specific
+.claude/settings.local.json

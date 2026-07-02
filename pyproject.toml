@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smbex"
+version = "0.1.0"
+description = "Terminal explorer for remote hosts over SMB and SSH/SFTP, with ranger-style navigation."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "impacket>=0.11",
+    "paramiko>=3.0",
+    "textual>=0.60",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+# Heavy, offline-translation stack. Installed only when working the translation
+# phase (see CLAUDE.md) so the foundation stays lean:  pip install -e ".[translate]"
+translate = [
+    "argostranslate>=1.9",
+]
+
+[project.scripts]
+smbex = "smbex.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["smbex*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: stands up a real local server (may bind a port); skipped if it cannot",
+]
