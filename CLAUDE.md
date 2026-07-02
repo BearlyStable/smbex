@@ -29,9 +29,9 @@ a slow connection. Target features (full list — most are still ahead):
 | Phase | Scope | State |
 |------|-------|-------|
 | 0 | Scaffold, packaging, venv, dark-mode app boots, smoke tests | **done** |
-| 1 | SMB connect/auth + backend abstraction + gateway + cache + tests | next |
-| 2 | Ranger-style browser UI wired to cache + tests | after 1 |
-| 3 | SSH/SFTP backend (paramiko) + tests | handed off |
+| 1 | SMB connect/auth + backend abstraction + gateway + cache + tests | **done** |
+| 2 | Ranger-style browser UI wired to cache + tests | **done** |
+| 3 | SSH/SFTP backend (paramiko) + tests | **next** |
 | 4 | Background downloads (SMB+SSH) + local mirror + progress UI | handed off |
 | 5 | Prioritization & throttling (browse preempts downloads) | handed off |
 | 6 | Preloader (surrounding folders, toggle) | handed off |
@@ -111,22 +111,23 @@ Two load-bearing seams keep this testable and responsive:
 ```
 smbex/
   __main__.py            python -m smbex
-  cli.py                 argparse; target/auth flags land in Phase 1
-  auth.py                (Phase 1) ConnSpec: parse smb/ssh target + build login params
+  cli.py                 ✓ argparse; impacket-style SMB flags + ssh:// target; connect + launch
+  auth.py                ✓ ConnSpec: parse smb/ssh target + build login params
   backend/
-    base.py              (Phase 1) Backend protocol, DirEntry
-    impacket_backend.py  (Phase 1) SMB via impacket SMBConnection
-    ssh_backend.py       (Phase 3) SSH/SFTP via paramiko
-    fake_backend.py      (Phase 1) in-memory tree for tests
-  gateway.py             (Phase 1) async priority-queue gateway
-  cache.py               (Phase 1) in-memory, session-only listing cache
-  download.py            (Phase 4) DownloadManager
-  preload.py             (Phase 6) Preloader
-  translate.py           (Phase 7) Translator (lazy argostranslate)
+    base.py              ✓ Backend protocol, DirEntry
+    impacket_backend.py  ✓ SMB via impacket SMBConnection
+    fake_backend.py      ✓ in-memory tree for tests
+    ssh_backend.py       Phase 3 — SSH/SFTP via paramiko
+  gateway.py             ✓ async priority-queue gateway (browse preempts download)
+  cache.py               ✓ in-memory, session-only listing cache
+  browser.py             ✓ ranger navigation controller (cache-backed, cursor memory)
+  download.py            Phase 4 — DownloadManager
+  preload.py             Phase 6 — Preloader
+  translate.py           Phase 7 — Translator (lazy argostranslate)
   ui/
-    app.py               Textual App (dark by default)
-    columns.py           (Phase 2) Miller-column widgets
-tests/                   pytest; FakeBackend + local-server fixtures
+    app.py               ✓ Textual ranger UI (parent|current|preview, dark default)
+    columns.py           ✓ Miller-column widget
+tests/                   pytest; FakeBackend + live SMB server fixtures
 ```
 
 ### Concurrency notes

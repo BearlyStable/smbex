@@ -1,4 +1,4 @@
-"""Phase 0 smoke tests: the package imports, the CLI parses, the app boots dark."""
+"""Smoke tests: the package imports, the CLI parses, the app boots in dark mode."""
 
 from __future__ import annotations
 
@@ -20,6 +20,13 @@ def test_parser_version_flag() -> None:
     assert exc.value.code == 0
 
 
+def test_parser_requires_target() -> None:
+    from smbex.cli import main
+
+    with pytest.raises(SystemExit):
+        main([])  # no target -> argparse error/exit
+
+
 def _is_dark(app: SmbexApp) -> bool:
     """Resolve dark-mode across Textual versions (theme object or ``dark`` flag)."""
     theme = getattr(app, "current_theme", None)
@@ -28,8 +35,8 @@ def _is_dark(app: SmbexApp) -> bool:
     return bool(getattr(app, "dark", False))
 
 
-async def test_app_boots_in_dark_mode() -> None:
-    app = SmbexApp()
+async def test_app_boots_in_dark_mode(make_app) -> None:
+    app = make_app()
     async with app.run_test() as pilot:
         assert _is_dark(app)
         await pilot.press("q")
