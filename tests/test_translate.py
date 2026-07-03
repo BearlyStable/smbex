@@ -5,6 +5,8 @@ the package installed)."""
 
 from __future__ import annotations
 
+import pytest
+
 from smbex.translate import ArgosTranslator, Translator, translate_name
 
 
@@ -82,3 +84,26 @@ def test_argos_translator_caches_within_session(monkeypatch):
     assert tr.translate("Datei") == "file"
     assert tr.translate("Datei") == "file"
     assert calls == ["Datei"]  # second lookup served from the session cache
+
+
+@pytest.mark.integration
+def test_real_argos_roundtrip_if_a_model_is_installed():
+    """Validates the ArgosTranslator<->argostranslate API against a real install.
+
+    Skips cleanly where argostranslate or a model is absent (e.g. the dev venv),
+    so it self-verifies the integration seam only where it can."""
+    argos = pytest.importorskip("argostranslate.translate")
+    langs = argos.get_installed_languages()
+    english = next((l for l in langs if l.code == "en"), None)
+    source = next(
+        (l for l in langs if l.code != "en" and english and l.get_translation(english)),
+        None,
+    )
+    if source is None or english is None:
+        pytest.skip("no argostranslate X->en model installed")
+
+    tr = ArgosTranslator(source.code)
+    assert tr.available is True
+    out = tr.translate("test")
+    assert isinstance(out, str) and out  # real model returns a non-empty string
+    assert tr.translate("test") is out or tr.translate("test") == out  # cached

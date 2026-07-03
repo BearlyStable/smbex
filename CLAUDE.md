@@ -35,7 +35,7 @@ a slow connection. Target features (full list — most are still ahead):
 | 4 | Background downloads (SMB+SSH) + local mirror + progress UI | **done** |
 | 5 | Prioritization & throttling (browse preempts downloads) | **done** (core; see note) |
 | 6 | Preloader (surrounding folders, toggle) | **done** |
-| 7 | Offline translation (argostranslate) + toggle | handed off |
+| 7 | Offline translation (argostranslate) + toggle | **done** |
 | 8 | Polish (help, reconnect, config, theming) | handed off |
 
 > Phase 5 note: the throttle (browse preempts an in-flight download between chunks)
@@ -52,16 +52,26 @@ a slow connection. Target features (full list — most are still ahead):
 > (grandchildren) or the current dir's same-level siblings — the current set is the
 > ranger "surrounding folders" neighbourhood, one hop in each direction.
 
+> Phase 7 note: filename translation is local-only (`smbex/translate.py`,
+> `ArgosTranslator`). Configure a source language with `--translate <lang>`; `t`
+> toggles the English column, shown beside the original (extensions preserved),
+> session-cached. **Privacy by construction:** inference runs on-box via
+> argostranslate/CTranslate2 — no filename leaves the machine — and the translate
+> path never calls the argos package index. The *only* networked step is the
+> explicit `python -m smbex --install-lang <lang>` (downloads the `.argosmodel`);
+> at runtime, if the model is missing the status bar names that command.
+> argostranslate is a lazy, optional, non-apt dependency: absent package/model
+> degrades to showing originals. Tests use a `FakeTranslator` (offline); a real
+> argos round-trip is an `@pytest.mark.integration` test that skips when absent.
+> Not done: language auto-detection (source is user-specified); smarter handling of
+> `snake_case`/compound filenames (currently the stem is translated as one token).
+
 **Definition of done for any feature: its tests pass AND the code is committed.**
 Commit once per completed phase (or smaller), with green tests in that commit.
 
 ## Open items / backlog (not yet done)
 
 Remaining phases:
-- **Phase 7 — Offline translation.** Not started; the `t` key is a reserved no-op.
-  Use `argostranslate` (lazy import; pip/pipx, **not** apt). Map a language to its
-  exact `.argosmodel` file and tell the user what to download; translate filenames
-  offline; show beside the original when toggled; cache per session. `translate.py` stub.
 - **Phase 8 — Polish.** Help screen, reconnect/error recovery, config file, theming.
 
 Smaller items raised in discussion (not blocking):
@@ -90,8 +100,8 @@ Smaller items raised in discussion (not blocking):
 
 Actual keybindings today: `h/j/k/l`+arrows, `g`/`G`, `l`/`Enter` open, `h` up,
 `d` download selected (file, or folder recursively), `a` all files here, `w` task
-panel, `p` preload toggle (prefetches surrounding folders), `t` translate
-(reserved), `q` quit.
+panel, `p` preload toggle (prefetches surrounding folders), `t` translate toggle
+(English beside originals; needs `--translate <lang>`), `q` quit.
 
 ## Install & environment
 
@@ -121,18 +131,29 @@ Approximate versions in Kali rolling (Debian sid), confirmed on packages.debian.
 | textual | `python3-textual` | 8.2.3 | 8.2.8 | needs the theme API (Textual ≳ 2.x; sid is fine, Debian *stable* trixie=2.1.2 ok, bookworm=0.1.13 **too old**) |
 | pytest | `python3-pytest` | — | 9.1.1 | dev/test |
 | pytest-asyncio | `python3-pytest-asyncio` | 1.4.0 | 1.4.0 | dev/test; `asyncio_mode=auto` set in pyproject |
-| **argostranslate** | **none** | — | (Phase 7) | **NOT in apt.** Install via pipx or a venv when doing Phase 7; models are downloaded `.argosmodel` files. |
+| **argostranslate** | **none** | — | (translation) | **NOT in apt.** Optional; install into a venv (below). Models are downloaded `.argosmodel` files. |
 
-> Because `argostranslate` isn't apt-installable, treat translation as opt-in: keep
-> the core app fully functional (and testable) without it. When implementing Phase 7,
-> import it lazily and degrade gracefully if it's absent. Flag the pip/pipx
-> requirement to the user rather than silently assuming pip.
+> Translation is opt-in and lazy-imported: the core app stays fully functional and
+> testable without `argostranslate`. To enable it on Kali without disturbing the
+> apt-only core, build a venv that **inherits** the apt packages and adds only the
+> translation stack:
+>
+> ```sh
+> python3 -m venv --system-site-packages ~/.venvs/smbex   # sees apt impacket/paramiko/textual
+> ~/.venvs/smbex/bin/pip install argostranslate            # pulls only ctranslate2/sentencepiece
+> ~/.venvs/smbex/bin/python -m smbex --install-lang de      # one-time, online: fetch the de->en model
+> ~/.venvs/smbex/bin/python -m smbex --translate de user@host   # run; 't' toggles the English column
+> ```
+>
+> No `--break-system-packages`, no re-installing the core via pip. Inference is fully
+> on-box (CTranslate2); no filename leaves the machine. If the model is absent the app
+> just shows originals and the status bar prints the `--install-lang` hint.
 
 ### Dev (venv, any distro)
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install -e ".[dev]"       # add ".[dev,translate]" for Phase 7
+.venv/bin/pip install -e ".[dev]"       # add ".[dev,translate]" for translation
 .venv/bin/python -m pytest -q
 ```
 
@@ -175,7 +196,7 @@ smbex/
   browser.py             ✓ ranger navigation controller (cache-backed, cursor memory)
   download.py            ✓ background DownloadManager (resume/skip, mirror, throttled; one handle/file)
   preload.py             ✓ surrounding-folder preloader (PRELOAD-priority, toggle-gated)
-  translate.py           Phase 7 — Translator (lazy argostranslate)
+  translate.py           ✓ local offline filename translation (lazy argostranslate)
   ui/
     app.py               ✓ Textual ranger UI (parent|current|preview, dark default)
     columns.py           ✓ Miller-column widget
@@ -224,5 +245,11 @@ tests/                   pytest; FakeBackend + live SMB server fixtures
 - **Folder sizes aren't shown** because neither SMB nor SFTP can report a
   directory's recursive size without walking it; if added, do it on demand at low
   priority and cache it (SSH could shell out to `du -sb`), never eagerly per listing.
-- **argostranslate is pip/pipx-only on Kali** — the one dependency outside apt;
-  keep translation optional so the apt-only install stays fully functional.
+- **argostranslate is pip-only (not apt)** — the one dependency outside apt, so
+  translation is optional and lazy-imported; the apt-only core stays fully functional
+  without it. Enable it via a `--system-site-packages` venv (see Install & environment).
+- **Translation is on-box only** — chosen over any cloud/API translator because
+  filenames must not leave the machine. argostranslate/CTranslate2 runs the model
+  locally; `smbex/translate.py` only ever touches the installed model at translate
+  time (never the argos package index), so the sole network use is the deliberate
+  `--install-lang` model download.

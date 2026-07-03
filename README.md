@@ -28,9 +28,17 @@ cd /path/to/smbex
 python3 -m smbex --version
 ```
 
-The offline translation engine (`argostranslate`) is **not** in apt; it is only
-needed for the translation feature (a later phase). See CLAUDE.md → *Install* for
-the pip/pipx options when you get there.
+The offline translation engine (`argostranslate`) is **not** in apt and is only
+needed for filename translation. Add it in a venv that inherits the apt packages:
+
+```sh
+python3 -m venv --system-site-packages ~/.venvs/smbex
+~/.venvs/smbex/bin/pip install argostranslate
+~/.venvs/smbex/bin/python -m smbex --install-lang de   # one-time, online: de->en model
+```
+
+Translation runs entirely on this machine (no filename leaves the box). See
+CLAUDE.md → *Install* for details.
 
 ### Development (any distro, venv)
 
@@ -58,6 +66,10 @@ Download in the background: `d` (selected file, or a folder recursively), `a` (a
 files in the current folder), `w` (show/hide the task panel). Downloads mirror the
 remote tree under `DIR/<host>` (`--download-dir`, default `./downloads`), resume
 partial files, skip complete ones, and yield to browsing so navigation stays snappy.
+
+Optional extras: `--preload` prefetches surrounding folders (toggle with `p`);
+`--translate <lang>` shows English filename translations beside the originals
+(toggle with `t`), computed on-box — see *Install* for the one-time model setup.
 
 ## Try it out (local demo, no root)
 

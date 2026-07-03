@@ -25,7 +25,15 @@ class Column(Static):
     shown: list[DirEntry] = []
     rendered_text: str = ""
 
-    def show(self, entries: list[DirEntry], cursor: int | None = None, active: bool = False) -> None:
+    def show(
+        self,
+        entries: list[DirEntry],
+        cursor: int | None = None,
+        active: bool = False,
+        translations: list[str] | None = None,
+    ) -> None:
+        """Render the listing. If ``translations`` (parallel to ``entries``) is
+        given, each English rendering is shown beside its original name."""
         self.shown = entries
         text = Text(no_wrap=True, overflow="ellipsis")
         if not entries:
@@ -40,13 +48,18 @@ class Column(Static):
             else:
                 style = ""
             text.append(label, style=style)
+            if translations is not None and i < len(translations):
+                rendered = translations[i]
+                if rendered and rendered != entry.name:
+                    text.append("  → ", style="dim")
+                    text.append(rendered, style="italic green")
             if not entry.is_dir:
                 text.append("  " + human_size(entry.size).rjust(7), style="dim")
             text.append("\n")
         self.rendered_text = text.plain
         self.update(text)
 
-    def show_file(self, entry: DirEntry | None) -> None:
+    def show_file(self, entry: DirEntry | None, translated: str | None = None) -> None:
         self.shown = []
         if entry is None:
             self.rendered_text = ""
@@ -54,6 +67,8 @@ class Column(Static):
             return
         text = Text()
         text.append(entry.name + "\n", style="bold")
+        if translated and translated != entry.name:
+            text.append(f"→ {translated}\n", style="italic green")
         text.append(f"{human_size(entry.size)}  ({entry.size} bytes)", style="dim")
         self.rendered_text = text.plain
         self.update(text)

@@ -62,6 +62,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="prefetch surrounding folders while browsing (default: off; toggle in-app with 'p')",
     )
     ui.add_argument(
+        "--translate",
+        metavar="LANG",
+        help="show English translations of filenames from LANG (e.g. de); toggle in-app with 't'. "
+        "Runs fully offline on this machine; needs the model (see --install-lang).",
+    )
+    ui.add_argument(
+        "--install-lang",
+        metavar="LANG",
+        help="download + install the LANG->English translation model, then exit "
+        "(one-time; the only step that uses the network)",
+    )
+    ui.add_argument(
         "--download-dir",
         metavar="DIR",
         default="downloads",
@@ -94,8 +106,27 @@ def _connect_ssh(ssh):
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.install_lang:  # one-time model setup; no host connection needed
+        from smbex.translate import ArgosTranslator
+
+        tr = ArgosTranslator(args.install_lang)
+        print(f"Installing {args.install_lang}->en translation model (one-time, needs network)...")
+        try:
+            tr.install_model()
+        except Exception as exc:  # noqa: BLE001 - report cleanly and exit non-zero
+            raise SystemExit(f"model install failed: {exc}")
+        print(f"Done. Launch with:  --translate {args.install_lang}")
+        return 0
+
     if not args.target:
         parser.error("a target is required, e.g. 'DOMAIN/user:pass@host' or 'ssh://user@host'")
+
+    translator = None
+    if args.translate:
+        from smbex.translate import ArgosTranslator
+
+        translator = ArgosTranslator(args.translate)
 
     from smbex.auth import Proto, make_conn_spec
 
@@ -124,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
             preload=args.preload,
             label=args.target,
             download_root=Path(args.download_dir) / _safe(spec.ssh.host),
+            translator=translator,
         ).run()
         return 0
 
@@ -146,5 +178,6 @@ def main(argv: list[str] | None = None) -> int:
         preload=args.preload,
         label=args.target,
         download_root=Path(args.download_dir) / _safe(smb.host),
+        translator=translator,
     ).run()
     return 0

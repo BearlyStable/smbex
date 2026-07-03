@@ -27,6 +27,16 @@ def test_preload_defaults_off_and_is_opt_in():
     assert build_parser().parse_args(["host", "--preload"]).preload is True
 
 
+def test_translation_flags():
+    args = build_parser().parse_args(["host", "--translate", "de"])
+    assert args.translate == "de"
+    assert args.install_lang is None
+    # --install-lang is a setup command; it needs no target.
+    setup = build_parser().parse_args(["--install-lang", "de"])
+    assert setup.install_lang == "de"
+    assert setup.target is None
+
+
 def test_ssh_host_key_flags():
     args = build_parser().parse_args(["ssh://user@host", "--strict-host-keys"])
     assert args.strict_host_keys is True

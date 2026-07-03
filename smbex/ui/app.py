@@ -22,6 +22,7 @@ from textual.widgets import Footer, Header, Static
 from smbex.browser import Browser
 from smbex.download import DownloadManager
 from smbex.gateway import Gateway
+from smbex.translate import Translator, translate_name
 from smbex.ui.columns import Column
 from smbex.ui.downloads import DownloadPanel
 
@@ -66,8 +67,7 @@ class SmbexApp(App):
         Binding("a", "download_all", "Grab all"),
         Binding("w", "toggle_downloads", "Tasks"),
         Binding("p", "toggle_preload", "Preload"),
-        # Reserved for Phase 7; visible in the footer, no-op for now.
-        Binding("t", "noop", "Translate"),
+        Binding("t", "toggle_translate", "Translate"),
     ]
 
     def __init__(
@@ -78,6 +78,7 @@ class SmbexApp(App):
         preload: bool = False,
         label: str = "",
         download_root: Path | str = "downloads",
+        translator: Translator | None = None,
     ):
         super().__init__()
         self._gateway = gateway
@@ -85,6 +86,9 @@ class SmbexApp(App):
         self._downloads = DownloadManager(gateway, Path(download_root))
         self._start_path = start_path
         self._label = label
+        self._translator = translator
+        # On when a language was configured (--translate); 't' toggles the display.
+        self.translate_enabled = translator is not None
 
     @property
     def downloads(self) -> DownloadManager:
@@ -154,8 +158,22 @@ class SmbexApp(App):
             self.browser.preload_surroundings()  # warm the current neighbourhood now
         self._update_status()
 
-    def action_noop(self) -> None:
-        """Reserved binding (translation arrives in a later phase)."""
+    async def action_toggle_translate(self) -> None:
+        self.translate_enabled = not self.translate_enabled
+        await self._refresh()  # re-render with/without the English column
+
+    def _entry_translations(self, entries: list) -> list[str] | None:
+        """English renderings parallel to ``entries``, or None when off/unavailable."""
+        if not (self.translate_enabled and self._translator and self._translator.available):
+            return None
+        return [translate_name(self._translator, e.name, e.is_dir) for e in entries]
+
+    def _name_translation(self, entry) -> str | None:
+        if entry is None or not (
+            self.translate_enabled and self._translator and self._translator.available
+        ):
+            return None
+        return translate_name(self._translator, entry.name, entry.is_dir)
 
     # --- download actions -----------------------------------------------------
     async def action_download(self) -> None:
@@ -194,15 +212,20 @@ class SmbexApp(App):
         parent = await browser.parent_entries()
         preview = await browser.preview_entries()
 
-        self.query_one("#parent", Column).show(parent, cursor=browser.parent_cursor(parent))
+        self.query_one("#parent", Column).show(
+            parent, cursor=browser.parent_cursor(parent), translations=self._entry_translations(parent)
+        )
         self.query_one("#current", Column).show(
-            browser.entries, cursor=browser.cursor, active=True
+            browser.entries,
+            cursor=browser.cursor,
+            active=True,
+            translations=self._entry_translations(browser.entries),
         )
         preview_col = self.query_one("#preview", Column)
         if preview is None:
-            preview_col.show_file(browser.selected)
+            preview_col.show_file(browser.selected, translated=self._name_translation(browser.selected))
         else:
-            preview_col.show(preview)
+            preview_col.show(preview, translations=self._entry_translations(preview))
         self._refresh_downloads()
 
     def _refresh_downloads(self) -> None:
@@ -227,6 +250,15 @@ class SmbexApp(App):
         if items:
             finished = sum(1 for i in items if i.status in ("done", "skipped"))
             text += f" │ dl:{finished}/{len(items)}"
+        if self._translator is not None:
+            t = self._translator
+            if not self.translate_enabled:
+                xl8 = "off"
+            elif t.available:
+                xl8 = f"{t.from_code}→{t.to_code}"
+            else:
+                xl8 = f"{t.from_code}: no model (--install-lang {t.from_code})"
+            text += f" │ xl8:{xl8}"
         self.query_one("#status", Static).update(text)
 
     def _status_error(self, exc: Exception) -> None:
