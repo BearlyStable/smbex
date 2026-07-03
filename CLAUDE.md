@@ -46,6 +46,36 @@ a slow connection. Target features (full list — most are still ahead):
 **Definition of done for any feature: its tests pass AND the code is committed.**
 Commit once per completed phase (or smaller), with green tests in that commit.
 
+## Open items / backlog (not yet done)
+
+Remaining phases:
+- **Phase 6 — Preloader.** The `p` toggle and `Browser.preload_enabled` flag exist
+  and show in the status bar, but **no prefetch happens yet — toggling `p` is
+  currently inert.** Implement in `smbex/preload.py` (a stub): on navigation, enqueue
+  listings of the parent, siblings, and the selected child at `Priority.PRELOAD` via
+  the gateway; cache them; respect the toggle. The cache + priority plumbing is ready.
+- **Phase 7 — Offline translation.** Not started; the `t` key is a reserved no-op.
+  Use `argostranslate` (lazy import; pip/pipx, **not** apt). Map a language to its
+  exact `.argosmodel` file and tell the user what to download; translate filenames
+  offline; show beside the original when toggled; cache per session. `translate.py` stub.
+- **Phase 8 — Polish.** Help screen, reconnect/error recovery, config file, theming.
+
+Smaller items raised in discussion (not blocking):
+- **Download reordering.** The download queue is FIFO with no way to prioritize one
+  transfer; consider a "jump to front" key on the task panel.
+- **On-demand folder sizes.** Not shown today (see Key decisions). If wanted: a key
+  that computes the selected folder's recursive size at low priority and caches it;
+  SSH can shell out to `du -sb`.
+- **`gg` chord.** The feature list mentions ranger's `gg`; the current UI binds a
+  single `g` for top (and `G` for bottom), and `d`/`a` (not `dd`/`da`/`dr`) for
+  downloads. Decide whether to implement the real multi-key chords.
+- **Phase 5 refinements (optional).** SSH second channel for downloads; live
+  bandwidth/ETA in the task panel.
+
+Actual keybindings today: `h/j/k/l`+arrows, `g`/`G`, `l`/`Enter` open, `h` up,
+`d` download selected (file, or folder recursively), `a` all files here, `w` task
+panel, `p` preload toggle (inert), `t` translate (reserved), `q` quit.
+
 ## Install & environment
 
 Dev was done on Fedora 44 / Python 3.13. Deploy target is **Kali**, where the user
@@ -102,7 +132,7 @@ python3 -m venv .venv
 Two load-bearing seams keep this testable and responsive:
 
 1. **Backend abstraction** (`smbex/backend/base.py`) — a protocol with
-   `roots() / list() / stat() / open_read()` over a single POSIX-style path.
+   `roots() / list() / stat() / open_read() / open_file()` over a single POSIX path.
    Implementations: `impacket_backend.py` (SMB; first path component = share),
    `ssh_backend.py` (paramiko/SFTP, Phase 3), and `fake_backend.py` (in-memory tree
    for fast offline tests). Everything above the backend is protocol-agnostic.
