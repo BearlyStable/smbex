@@ -47,9 +47,10 @@ a slow connection. Target features (full list — most are still ahead):
 > selected subdirectory, its siblings, and the parent — at `Priority.PRELOAD`
 > (`smbex/preload.py`, `Preloader`). Fire-and-forget, cache-checked and single-flight
 > (skips cached / in-flight paths), toggle-gated by `p` (which also warms the current
-> view when switched on). Tested in `tests/test_preload.py`. Not done: preloading a
-> level deeper (grandchildren) or the current dir's same-level siblings — the current
-> set is the ranger "surrounding folders" neighbourhood, one hop in each direction.
+> view when switched on). **Default off** — opt in with `--preload` or the `p` toggle.
+> Tested in `tests/test_preload.py`. Not done: preloading a level deeper
+> (grandchildren) or the current dir's same-level siblings — the current set is the
+> ranger "surrounding folders" neighbourhood, one hop in each direction.
 
 **Definition of done for any feature: its tests pass AND the code is committed.**
 Commit once per completed phase (or smaller), with green tests in that commit.
@@ -64,6 +65,18 @@ Remaining phases:
 - **Phase 8 — Polish.** Help screen, reconnect/error recovery, config file, theming.
 
 Smaller items raised in discussion (not blocking):
+- **Listing status markers (UI).** Show state inline in the file/folder listing so
+  the user can see, at a glance, what's already local vs. remote:
+  - **folder already cached** (its listing is in `ListingCache`) — e.g. a dim marker
+    or colour on directories whose path is `in browser.cache`; useful once preload is
+    on, to see how far the neighbourhood has warmed.
+  - **queued/added to the download queue** — files or folders enqueued but not yet
+    finished (`DownloadItem.status` in `queued`/`running`).
+  - **already downloaded** — present and complete locally (`status` `done`/`skipped`,
+    or the mirror file exists at full size).
+  Wire it through `Column`/`columns.py` rendering, keyed off `browser.cache` and the
+  `DownloadManager.items` (index by `remote_path`). Keep it a pure render concern —
+  no new backend calls; the markers read existing in-memory state. Respect dark mode.
 - **Download reordering.** The download queue is FIFO with no way to prioritize one
   transfer; consider a "jump to front" key on the task panel.
 - **On-demand folder sizes.** Not shown today (see Key decisions). If wanted: a key

@@ -56,7 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     ui = parser.add_argument_group("UI")
-    ui.add_argument("--no-preload", action="store_true", help="disable folder preloading")
+    ui.add_argument(
+        "--preload",
+        action="store_true",
+        help="prefetch surrounding folders while browsing (default: off; toggle in-app with 'p')",
+    )
     ui.add_argument(
         "--download-dir",
         metavar="DIR",
@@ -117,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
         SmbexApp(
             Gateway(backend),
             start_path=getattr(backend, "start_rel", ""),
-            preload=not args.no_preload,
+            preload=args.preload,
             label=args.target,
             download_root=Path(args.download_dir) / _safe(spec.ssh.host),
         ).run()
@@ -139,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
 
     SmbexApp(
         Gateway(backend),
-        preload=not args.no_preload,
+        preload=args.preload,
         label=args.target,
         download_root=Path(args.download_dir) / _safe(smb.host),
     ).run()

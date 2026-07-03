@@ -22,6 +22,11 @@ def test_auth_flags():
     assert args.no_pass is True
 
 
+def test_preload_defaults_off_and_is_opt_in():
+    assert build_parser().parse_args(["host"]).preload is False
+    assert build_parser().parse_args(["host", "--preload"]).preload is True
+
+
 def test_ssh_host_key_flags():
     args = build_parser().parse_args(["ssh://user@host", "--strict-host-keys"])
     assert args.strict_host_keys is True
