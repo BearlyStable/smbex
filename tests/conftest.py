@@ -93,6 +93,37 @@ def make_app():
     return _make
 
 
+class FakeTranslator:
+    """Deterministic stand-in satisfying smbex.translate.Translator, offline.
+
+    Lives here (not in a test module) so tests share it via the ``fake_translator``
+    fixture instead of importing across modules — robust even when a dependency
+    pollutes site-packages with its own top-level ``tests`` package.
+    """
+
+    from_code = "de"
+    to_code = "en"
+
+    def __init__(self, table: dict[str, str], available: bool = True):
+        self.table = table
+        self._available = available
+        self.calls: list[str] = []
+
+    @property
+    def available(self) -> bool:
+        return self._available
+
+    def translate(self, text: str) -> str:
+        self.calls.append(text)
+        return self.table.get(text, text)
+
+
+@pytest.fixture
+def fake_translator():
+    """Factory: ``fake_translator({'wort': 'word'}, available=True)``."""
+    return FakeTranslator
+
+
 @pytest.fixture(scope="session")
 def sftp_server(tmp_path_factory):
     """An in-process paramiko SFTP server on localhost serving a temp tree.

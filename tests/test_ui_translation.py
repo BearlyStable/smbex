@@ -4,11 +4,10 @@ the originals, driven by an injected FakeTranslator (no argostranslate needed)."
 from __future__ import annotations
 
 from smbex.ui.columns import Column
-from tests.test_translate import FakeTranslator
 
 
-async def test_translation_shown_beside_original_and_toggles(make_app):
-    tr = FakeTranslator({"docs": "documents", "pics": "pictures", "readme": "readme"})
+async def test_translation_shown_beside_original_and_toggles(make_app, fake_translator):
+    tr = fake_translator({"docs": "documents", "pics": "pictures", "readme": "readme"})
     app = make_app(translator=tr)  # a configured language -> display starts on
     async with app.run_test() as pilot:
         await pilot.press("j")  # select "share"
@@ -28,9 +27,9 @@ async def test_translation_shown_beside_original_and_toggles(make_app):
         await pilot.press("q")
 
 
-async def test_extensionful_file_keeps_extension_in_translation(make_app):
+async def test_extensionful_file_keeps_extension_in_translation(make_app, fake_translator):
     tree = {"share": {"Rechnung.pdf": b"x", "Bilder": {"1.png": b"y"}}}
-    tr = FakeTranslator({"Rechnung": "invoice", "Bilder": "pictures"})
+    tr = fake_translator({"Rechnung": "invoice", "Bilder": "pictures"})
     app = make_app(tree, translator=tr)
     async with app.run_test() as pilot:
         await pilot.press("l")  # enter "share"

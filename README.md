@@ -29,12 +29,16 @@ python3 -m smbex --version
 ```
 
 The offline translation engine (`argostranslate`) is **not** in apt and is only
-needed for filename translation. Add it in a venv that inherits the apt packages:
+needed for filename translation. Add it in a venv that inherits the apt packages.
+Use the **CPU torch index** — a plain `pip install argostranslate` drags in ~5 GB
+of CUDA/torch wheels it never uses (see CLAUDE.md → *Install*):
 
 ```sh
 python3 -m venv --system-site-packages ~/.venvs/smbex
-~/.venvs/smbex/bin/pip install argostranslate
-~/.venvs/smbex/bin/python -m smbex --install-lang de   # one-time, online: de->en model
+~/.venvs/smbex/bin/pip install \
+  --index-url https://download.pytorch.org/whl/cpu \
+  --extra-index-url https://pypi.org/simple  argostranslate
+~/.venvs/smbex/bin/python -m smbex --install-lang ja   # one-time, online: ja->en model
 ```
 
 Translation runs entirely on this machine (no filename leaves the box). See
@@ -83,7 +87,12 @@ Terminal 2 — connect the client (any username/password is accepted):
 
 ```sh
 python3 -m smbex 'demo:demo@127.0.0.1' --port 4455
+# with Japanese filename translation (needs: --install-lang ja), then press 't':
+python3 -m smbex --translate ja 'demo:demo@127.0.0.1' --port 4455
 ```
+
+The demo share has a `日本語/` folder of Japanese-named files and folders (写真/,
+仕事/, 地図.png, …) so you can watch them render as `写真 → Photos` with `t`.
 
 ## Test
 

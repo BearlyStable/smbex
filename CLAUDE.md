@@ -87,6 +87,11 @@ Smaller items raised in discussion (not blocking):
   Wire it through `Column`/`columns.py` rendering, keyed off `browser.cache` and the
   `DownloadManager.items` (index by `remote_path`). Keep it a pure render concern —
   no new backend calls; the markers read existing in-memory state. Respect dark mode.
+- **Leaner translation install.** `argostranslate` 1.11 → `stanza` → `torch` pulls a
+  ~5 GB CUDA stack (CPU torch index cuts it to ~1–1.5 GB; see Install). Investigate a
+  smaller footprint: pin a stanza-free argostranslate, or vendor just `ctranslate2` +
+  `sentencepiece` + a light sentence splitter and drive the model directly. `translate.py`
+  already isolates the argos calls, so a backend swap is contained.
 - **Download reordering.** The download queue is FIFO with no way to prioritize one
   transfer; consider a "jump to front" key on the task panel.
 - **On-demand folder sizes.** Not shown today (see Key decisions). If wanted: a key
@@ -135,19 +140,30 @@ Approximate versions in Kali rolling (Debian sid), confirmed on packages.debian.
 
 > Translation is opt-in and lazy-imported: the core app stays fully functional and
 > testable without `argostranslate`. To enable it on Kali without disturbing the
-> apt-only core, build a venv that **inherits** the apt packages and adds only the
+> apt-only core, build a venv that **inherits** the apt packages and adds the
 > translation stack:
 >
 > ```sh
 > python3 -m venv --system-site-packages ~/.venvs/smbex   # sees apt impacket/paramiko/textual
-> ~/.venvs/smbex/bin/pip install argostranslate            # pulls only ctranslate2/sentencepiece
-> ~/.venvs/smbex/bin/python -m smbex --install-lang de      # one-time, online: fetch the de->en model
-> ~/.venvs/smbex/bin/python -m smbex --translate de user@host   # run; 't' toggles the English column
+> # CPU-only torch — see the footprint warning below; without the CPU index you get ~5 GB:
+> ~/.venvs/smbex/bin/pip install \
+>   --index-url https://download.pytorch.org/whl/cpu \
+>   --extra-index-url https://pypi.org/simple  argostranslate
+> ~/.venvs/smbex/bin/python -m smbex --install-lang ja      # one-time, online: fetch the ja->en model
+> ~/.venvs/smbex/bin/python -m smbex --translate ja user@host   # run; 't' toggles the English column
 > ```
 >
 > No `--break-system-packages`, no re-installing the core via pip. Inference is fully
 > on-box (CTranslate2); no filename leaves the machine. If the model is absent the app
 > just shows originals and the status bar prints the `--install-lang` hint.
+>
+> **⚠ Footprint.** `argostranslate` (1.11) hard-depends on `stanza`, which pulls
+> `torch`; a plain `pip install argostranslate` drags in ~2.7 GB of `nvidia-*` CUDA
+> wheels + torch + triton — **~5 GB total** for a job that only uses `ctranslate2`
+> (torch/stanza are never needed to translate filenames). Installing from the
+> **CPU torch index** (above) drops the CUDA/triton wheels (~3.4 GB saved, verified
+> via `pip install --dry-run`), leaving ~1–1.5 GB. Leaner still would mean pinning
+> an older, stanza-free argostranslate — untried; flagged in the backlog.
 
 ### Dev (venv, any distro)
 

@@ -10,46 +10,26 @@ import pytest
 from smbex.translate import ArgosTranslator, Translator, translate_name
 
 
-class FakeTranslator:
-    """A deterministic stand-in satisfying the Translator protocol."""
-
-    from_code = "de"
-    to_code = "en"
-
-    def __init__(self, table: dict[str, str], available: bool = True):
-        self.table = table
-        self._available = available
-        self.calls: list[str] = []
-
-    @property
-    def available(self) -> bool:
-        return self._available
-
-    def translate(self, text: str) -> str:
-        self.calls.append(text)
-        return self.table.get(text, text)
+def test_fake_satisfies_protocol(fake_translator):
+    assert isinstance(fake_translator({}), Translator)
 
 
-def test_fake_satisfies_protocol():
-    assert isinstance(FakeTranslator({}), Translator)
-
-
-def test_translate_name_preserves_file_extension():
-    tr = FakeTranslator({"Quartalsbericht": "quarterly report"})
+def test_translate_name_preserves_file_extension(fake_translator):
+    tr = fake_translator({"Quartalsbericht": "quarterly report"})
     assert translate_name(tr, "Quartalsbericht.txt", is_dir=False) == "quarterly report.txt"
     assert tr.calls == ["Quartalsbericht"]  # only the stem was translated
 
 
-def test_translate_name_whole_for_dirs_and_dotfiles_and_extensionless():
-    tr = FakeTranslator({"Bilder": "pictures", ".geheim": "[x]", "Rechnung": "invoice"})
+def test_translate_name_whole_for_dirs_and_dotfiles_and_extensionless(fake_translator):
+    tr = fake_translator({"Bilder": "pictures", ".geheim": "[x]", "Rechnung": "invoice"})
     assert translate_name(tr, "Bilder", is_dir=True) == "pictures"
     assert translate_name(tr, ".geheim", is_dir=False) == "[x]"
     assert translate_name(tr, "Rechnung", is_dir=False) == "invoice"
 
 
-def test_translate_name_falls_back_without_translator():
+def test_translate_name_falls_back_without_translator(fake_translator):
     assert translate_name(None, "Rechnung.pdf") == "Rechnung.pdf"
-    unavailable = FakeTranslator({"Rechnung": "invoice"}, available=False)
+    unavailable = fake_translator({"Rechnung": "invoice"}, available=False)
     assert translate_name(unavailable, "Rechnung.pdf") == "Rechnung.pdf"
     assert unavailable.calls == []  # never consulted when unavailable
 
@@ -62,8 +42,8 @@ def test_argos_translator_degrades_without_model():
     assert translate_name(tr, "etwas.txt") == "etwas.txt"
 
 
-def test_session_cache_translates_each_string_once():
-    tr = FakeTranslator({"Datei": "file"})
+def test_session_cache_translates_each_string_once(fake_translator):
+    tr = fake_translator({"Datei": "file"})
     # translate() is the cached unit; drive it directly.
     assert tr.translate("Datei") == "file"
     assert tr.translate("Datei") == "file"
