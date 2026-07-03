@@ -114,6 +114,7 @@ class SmbexApp(App):
 
     async def on_unmount(self) -> None:
         await self._downloads.stop()  # stop before the gateway it depends on
+        await self.browser.preloader.stop()  # cancel prefetches before the gateway
         await self._gateway.stop()
 
     # --- navigation actions ---------------------------------------------------
@@ -149,6 +150,8 @@ class SmbexApp(App):
 
     def action_toggle_preload(self) -> None:
         self.browser.preload_enabled = not self.browser.preload_enabled
+        if self.browser.preload_enabled:
+            self.browser.preload_surroundings()  # warm the current neighbourhood now
         self._update_status()
 
     def action_noop(self) -> None:

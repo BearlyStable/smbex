@@ -34,7 +34,7 @@ a slow connection. Target features (full list — most are still ahead):
 | 3 | SSH/SFTP backend (paramiko) + tests | **done** |
 | 4 | Background downloads (SMB+SSH) + local mirror + progress UI | **done** |
 | 5 | Prioritization & throttling (browse preempts downloads) | **done** (core; see note) |
-| 6 | Preloader (surrounding folders, toggle) | **next** |
+| 6 | Preloader (surrounding folders, toggle) | **done** |
 | 7 | Offline translation (argostranslate) + toggle | handed off |
 | 8 | Polish (help, reconnect, config, theming) | handed off |
 
@@ -43,17 +43,20 @@ a slow connection. Target features (full list — most are still ahead):
 > remains is optional: an SSH second channel so a big transfer doesn't share the
 > browse channel, and a live bandwidth/ETA display.
 
+> Phase 6 note: on every navigation the browser warms the neighbourhood — the
+> selected subdirectory, its siblings, and the parent — at `Priority.PRELOAD`
+> (`smbex/preload.py`, `Preloader`). Fire-and-forget, cache-checked and single-flight
+> (skips cached / in-flight paths), toggle-gated by `p` (which also warms the current
+> view when switched on). Tested in `tests/test_preload.py`. Not done: preloading a
+> level deeper (grandchildren) or the current dir's same-level siblings — the current
+> set is the ranger "surrounding folders" neighbourhood, one hop in each direction.
+
 **Definition of done for any feature: its tests pass AND the code is committed.**
 Commit once per completed phase (or smaller), with green tests in that commit.
 
 ## Open items / backlog (not yet done)
 
 Remaining phases:
-- **Phase 6 — Preloader.** The `p` toggle and `Browser.preload_enabled` flag exist
-  and show in the status bar, but **no prefetch happens yet — toggling `p` is
-  currently inert.** Implement in `smbex/preload.py` (a stub): on navigation, enqueue
-  listings of the parent, siblings, and the selected child at `Priority.PRELOAD` via
-  the gateway; cache them; respect the toggle. The cache + priority plumbing is ready.
 - **Phase 7 — Offline translation.** Not started; the `t` key is a reserved no-op.
   Use `argostranslate` (lazy import; pip/pipx, **not** apt). Map a language to its
   exact `.argosmodel` file and tell the user what to download; translate filenames
@@ -74,7 +77,8 @@ Smaller items raised in discussion (not blocking):
 
 Actual keybindings today: `h/j/k/l`+arrows, `g`/`G`, `l`/`Enter` open, `h` up,
 `d` download selected (file, or folder recursively), `a` all files here, `w` task
-panel, `p` preload toggle (inert), `t` translate (reserved), `q` quit.
+panel, `p` preload toggle (prefetches surrounding folders), `t` translate
+(reserved), `q` quit.
 
 ## Install & environment
 
@@ -157,7 +161,7 @@ smbex/
   cache.py               ✓ in-memory, session-only listing cache
   browser.py             ✓ ranger navigation controller (cache-backed, cursor memory)
   download.py            ✓ background DownloadManager (resume/skip, mirror, throttled; one handle/file)
-  preload.py             Phase 6 — Preloader
+  preload.py             ✓ surrounding-folder preloader (PRELOAD-priority, toggle-gated)
   translate.py           Phase 7 — Translator (lazy argostranslate)
   ui/
     app.py               ✓ Textual ranger UI (parent|current|preview, dark default)

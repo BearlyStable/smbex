@@ -15,6 +15,7 @@ from __future__ import annotations
 from smbex.backend.base import DirEntry
 from smbex.cache import ListingCache
 from smbex.gateway import Gateway, Priority
+from smbex.preload import Preloader
 
 
 def _join(path: str, name: str) -> str:
@@ -39,6 +40,7 @@ class Browser:
         self.gateway = gateway
         self.cache: ListingCache[list[DirEntry]] = cache if cache is not None else ListingCache()
         self.preload_enabled = preload
+        self.preloader = Preloader(gateway, self.cache)
         self.path = ""  # current directory ("" == roots / share picker)
         self.cursor = 0
         self.entries: list[DirEntry] = []
@@ -58,8 +60,19 @@ class Browser:
         self.entries = await self.listdir(self.path)
         remembered = self._cursor_memory.get(self.path, 0)
         self.cursor = min(max(remembered, 0), len(self.entries) - 1) if self.entries else 0
-        # Preloading of surrounding folders is Phase 6; the toggle lives here now.
+        self.preload_surroundings()  # warm neighbouring folders (Phase 6; toggle-gated)
         return self.entries
+
+    def preload_surroundings(self) -> None:
+        """Kick off (toggle-gated) prefetch of the current view's neighbours.
+
+        Fire-and-forget: spawns background jobs at ``Priority.PRELOAD`` and returns
+        at once, so navigation stays instant. Called on every ``load`` and also when
+        the ``p`` toggle is switched on so the current neighbourhood warms right away.
+        """
+        self.preloader.preload(
+            self.path, self.entries, self.selected, enabled=self.preload_enabled
+        )
 
     @property
     def selected(self) -> DirEntry | None:
