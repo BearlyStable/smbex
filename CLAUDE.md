@@ -68,6 +68,17 @@ a slow connection. Target features (full list — most are still ahead):
 > skipped when the model/engine is absent. Not done: language auto-detection (source
 > is user-specified); smarter `snake_case`/compound handling (stem is one token).
 
+> Timestamps note: entries show a compact age (`columns.py` `human_time`: '5m'/'3h'/
+> '2d'/'3w'/'6mo'/'2y', blank for unknown mtime=0) in every column; the file preview
+> shows the absolute stamp (`full_time`). `mtime` is the only cross-protocol time
+> (SFTP v3 = mtime/atime; SMB also has creation/change) and is already populated by
+> both backends, so no backend change was needed. Sorting: `Browser.sort_mode` +
+> `_sorted` (canonical name order stays in the cache; the active sort is a view
+> transform applied in `load`/`parent_entries`/`preview_entries`). `o` cycles
+> name→newest→oldest, keeping the selection and showing the mode in the status bar;
+> mtime modes interleave dirs/files by time (name tiebreak). Tested in
+> `tests/test_timestamps.py`. Recursive subtree time is a separate backlog item.
+
 > Status markers note: the current column carries a one-char status gutter
 > (`SmbexApp._entry_markers` → `Column.show(markers=...)`, styled in `columns.py`
 > `MARKER_STYLE`): `·` dir listing cached (`path in browser.cache`), `↓` queued/
@@ -86,25 +97,14 @@ Remaining phases:
 - **Phase 8 — Polish.** Help screen, reconnect/error recovery, config file, theming.
 
 Smaller items raised in discussion (not blocking):
-- **Timestamps + sort by time (NEXT).** Show entry modification times in the listing
-  and allow sorting by them. The data is already in hand: `DirEntry.mtime` is populated
-  by both backends, and **`mtime` is the only cross-protocol timestamp** — SMB
-  (impacket) exposes creation/write/access/change FILETIMEs (`get_ctime_epoch` =
-  *creation*, `get_mtime_epoch` = write, `get_atime_epoch` = access), but SFTP v3
-  (paramiko) exposes only `st_mtime`/`st_atime`. So base the feature on mtime; a
-  richer per-protocol view (SMB creation/change) is optional and SMB-only.
-  - Display: a right-aligned relative/short time column in `columns.py` (guard the
-    `mtime == 0` "unknown" case). SMB times are UTC FILETIME→epoch; SFTP is server
-    local epoch — label/format consistently, don't imply false precision.
-  - Sort: add a sort key toggle in `browser._sort` (name ↔ mtime, asc/desc); a
-    keybind (e.g. `o`/`O` like ranger's order menu) and show the active order in the
-    status bar. Keep dirs-first optional.
-  - **Recursive "latest modified in subtree" is NOT free.** A folder's own mtime only
-    reflects add/remove/rename of its *direct* entries — not deep edits or in-place
-    file changes (true on NTFS-over-SMB and POSIX-over-SFTP alike). To show "newest
-    thing anywhere under here" you must walk the tree (max mtime) — do it on demand at
-    low priority and cache it, exactly like the on-demand folder-size item; SSH can
-    shortcut with `find DIR -printf '%T@\n' | sort -n | tail -1`.
+- **Recursive "latest modified in subtree" time.** A follow-on to the timestamp
+  feature: a folder's own mtime only reflects add/remove/rename of its *direct*
+  entries — not deep edits or in-place file changes (true on NTFS-over-SMB and
+  POSIX-over-SFTP alike). To show "newest thing anywhere under here" you must walk the
+  tree (max mtime) — do it on demand at low priority and cache it, exactly like the
+  on-demand folder-size item; SSH can shortcut with `find DIR -printf '%T@\n' | sort
+  -n | tail -1`. Also optional: a richer SMB-only view of creation/change times
+  (SFTP v3 has neither).
 - **Download reordering.** The download queue is FIFO with no way to prioritize one
   transfer; consider a "jump to front" key on the task panel.
 - **On-demand folder sizes.** Not shown today (see Key decisions). If wanted: a key
@@ -118,8 +118,9 @@ Smaller items raised in discussion (not blocking):
 
 Actual keybindings today: `h/j/k/l`+arrows, `g`/`G`, `l`/`Enter` open, `h` up,
 `d` download selected (file, or folder recursively), `a` all files here, `w` task
-panel, `p` preload toggle (prefetches surrounding folders), `t` translate toggle
-(English beside originals; needs `--translate <lang>`), `q` quit.
+panel, `o` cycle sort (name→newest→oldest), `p` preload toggle (prefetches
+surrounding folders), `t` translate toggle (English beside originals; needs
+`--translate <lang>`), `q` quit.
 
 ## Install & environment
 

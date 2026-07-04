@@ -31,8 +31,14 @@ def _base(path: str) -> str:
 
 
 def _sort(entries: list[DirEntry]) -> list[DirEntry]:
-    # Directories first, then case-insensitive by name (ranger-like).
+    # Directories first, then case-insensitive by name (ranger-like). This is also
+    # the canonical order stored in the cache; the active view sort is applied on top.
     return sorted(entries, key=lambda e: (not e.is_dir, e.name.lower()))
+
+
+#: View sort modes cycled by the 'o' key; ``mtime`` is the only cross-protocol time.
+SORT_MODES = ("name", "mtime_desc", "mtime_asc")
+SORT_LABELS = {"name": "name", "mtime_desc": "newest", "mtime_asc": "oldest"}
 
 
 class Browser:
@@ -44,7 +50,31 @@ class Browser:
         self.path = ""  # current directory ("" == roots / share picker)
         self.cursor = 0
         self.entries: list[DirEntry] = []
+        self.sort_mode = "name"
         self._cursor_memory: dict[str, int] = {}
+
+    def _sorted(self, entries: list[DirEntry]) -> list[DirEntry]:
+        """Apply the active view sort. mtime modes ignore dirs-first (newest/oldest
+        wins regardless of type), with name as a stable tiebreak."""
+        if self.sort_mode == "mtime_desc":
+            return sorted(entries, key=lambda e: (-e.mtime, e.name.lower()))
+        if self.sort_mode == "mtime_asc":
+            return sorted(entries, key=lambda e: (e.mtime, e.name.lower()))
+        return _sort(entries)
+
+    def cycle_sort(self) -> str:
+        """Advance to the next sort mode and re-sort the current view in place,
+        keeping the selected entry under the cursor. Returns the new mode."""
+        self.sort_mode = SORT_MODES[(SORT_MODES.index(self.sort_mode) + 1) % len(SORT_MODES)]
+        selected = self.selected
+        self.entries = self._sorted(self.entries)
+        if selected is not None:
+            for i, entry in enumerate(self.entries):
+                if entry.name == selected.name:
+                    self.cursor = i
+                    self._cursor_memory[self.path] = i
+                    break
+        return self.sort_mode
 
     async def listdir(self, path: str, priority: int = Priority.BROWSE) -> list[DirEntry]:
         cached = self.cache.get(path)
@@ -57,7 +87,7 @@ class Browser:
     async def load(self, path: str | None = None) -> list[DirEntry]:
         if path is not None:
             self.path = path
-        self.entries = await self.listdir(self.path)
+        self.entries = self._sorted(await self.listdir(self.path))
         remembered = self._cursor_memory.get(self.path, 0)
         self.cursor = min(max(remembered, 0), len(self.entries) - 1) if self.entries else 0
         self.preload_surroundings()  # warm neighbouring folders (Phase 6; toggle-gated)
@@ -114,13 +144,13 @@ class Browser:
     async def parent_entries(self) -> list[DirEntry]:
         if not self.path:
             return []
-        return await self.listdir(_parent(self.path))
+        return self._sorted(await self.listdir(_parent(self.path)))
 
     async def preview_entries(self) -> list[DirEntry] | None:
         """Listing of the selected directory, or ``None`` when a file is selected."""
         sel = self.selected
         if sel is not None and sel.is_dir:
-            return await self.listdir(_join(self.path, sel.name))
+            return self._sorted(await self.listdir(_join(self.path, sel.name)))
         return None
 
     def child_path(self, name: str) -> str:

@@ -19,7 +19,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widgets import Footer, Header, Static
 
-from smbex.browser import Browser
+from smbex.browser import Browser, SORT_LABELS
 from smbex.download import DownloadManager
 from smbex.gateway import Gateway
 from smbex.translate import Translator, translate_name
@@ -68,6 +68,7 @@ class SmbexApp(App):
         Binding("w", "toggle_downloads", "Tasks"),
         Binding("p", "toggle_preload", "Preload"),
         Binding("t", "toggle_translate", "Translate"),
+        Binding("o", "cycle_sort", "Sort"),
     ]
 
     def __init__(
@@ -161,6 +162,10 @@ class SmbexApp(App):
     async def action_toggle_translate(self) -> None:
         self.translate_enabled = not self.translate_enabled
         await self._refresh()  # re-render with/without the English column
+
+    async def action_cycle_sort(self) -> None:
+        self.browser.cycle_sort()  # re-sorts the current view, keeping the selection
+        await self._refresh()
 
     def _entry_translations(self, entries: list) -> list[str] | None:
         """English renderings parallel to ``entries``, or None when off/unavailable."""
@@ -284,6 +289,7 @@ class SmbexApp(App):
         preload = "on" if browser.preload_enabled else "off"
         text = (
             f" {self._label or 'smbex'} │ /{browser.path} │ "
+            f"sort:{SORT_LABELS[browser.sort_mode]} │ "
             f"preload:{preload} │ cache:{browser.cache.hits}/{total}"
         )
         items = self._downloads.items

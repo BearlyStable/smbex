@@ -38,8 +38,9 @@ class _FakeRemoteFile:
 
 
 class FakeBackend:
-    def __init__(self, tree: dict):
+    def __init__(self, tree: dict, mtimes: dict[str, float] | None = None):
         self._tree = tree
+        self._mtimes = mtimes or {}  # full slash-path -> mtime epoch (default 0)
         # Test instrumentation:
         self.list_calls: list[str] = []
         self.exec_order: list[str] = []
@@ -61,13 +62,17 @@ class FakeBackend:
             node = node[part]
         return node
 
-    @staticmethod
-    def _entry(name: str, node) -> DirEntry:
+    def _entry(self, name: str, node, full: str) -> DirEntry:
         is_dir = isinstance(node, dict)
-        return DirEntry(name=name, is_dir=is_dir, size=0 if is_dir else len(node))
+        return DirEntry(
+            name=name,
+            is_dir=is_dir,
+            size=0 if is_dir else len(node),
+            mtime=self._mtimes.get(full, 0.0),
+        )
 
     def roots(self) -> list[DirEntry]:
-        return [self._entry(name, node) for name, node in self._tree.items()]
+        return [self._entry(name, node, name) for name, node in self._tree.items()]
 
     def list(self, path: str) -> list[DirEntry]:
         self.list_calls.append(path)
@@ -79,12 +84,15 @@ class FakeBackend:
         node = self._resolve(path)
         if not isinstance(node, dict):
             raise NotADirectoryError(path)
-        return [self._entry(name, child) for name, child in node.items()]
+        return [
+            self._entry(name, child, f"{path}/{name}" if path else name)
+            for name, child in node.items()
+        ]
 
     def stat(self, path: str) -> DirEntry:
         node = self._resolve(path)
         parts = self._parts(path)
-        return self._entry(parts[-1] if parts else "", node)
+        return self._entry(parts[-1] if parts else "", node, path)
 
     def open_read(self, path: str, offset: int = 0, chunk: int = 65536) -> Iterator[bytes]:
         node = self._resolve(path)

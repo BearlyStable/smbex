@@ -86,8 +86,8 @@ def make_app():
     from smbex.gateway import Gateway
     from smbex.ui.app import SmbexApp
 
-    def _make(tree: dict | None = None, **kwargs):
-        backend = FakeBackend(tree if tree is not None else dict(UI_TREE))
+    def _make(tree: dict | None = None, mtimes: dict | None = None, **kwargs):
+        backend = FakeBackend(tree if tree is not None else dict(UI_TREE), mtimes=mtimes)
         return SmbexApp(Gateway(backend), **kwargs)
 
     return _make

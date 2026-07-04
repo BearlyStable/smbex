@@ -64,6 +64,9 @@ python3 -m smbex -i ~/.ssh/id_ed25519 'ssh://user@host:2222/var/log'
 ```
 
 Navigate like ranger: `h/j/k/l` (or arrows), `g`/`G` for top/bottom, `q` to quit.
+Listings show a compact age (`3d`, `2w`) and file sizes; `o` cycles the sort
+(name → newest → oldest). A status gutter marks folders whose listing is cached
+(`·`), and files/folders queued (`↓`) / downloaded (`✓`).
 Download in the background: `d` (selected file, or a folder recursively), `a` (all
 files in the current folder), `w` (show/hide the task panel). Downloads mirror the
 remote tree under `DIR/<host>` (`--download-dir`, default `./downloads`), resume

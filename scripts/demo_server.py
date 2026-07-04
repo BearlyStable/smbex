@@ -16,7 +16,9 @@ so you can see filename translation live:
 
 from __future__ import annotations
 
+import os
 import tempfile
+import time
 from pathlib import Path
 
 from impacket.smbserver import SimpleSMBServer
@@ -60,6 +62,16 @@ def _populate_japanese(base: Path) -> None:
     # A few loose files at the top of 日本語/ too.
     for name in ("地図.png", "買い物リスト.txt", "天気.txt"):  # Map, Shopping list, Weather
         (base / name).write_text(name + "\n")
+    # Stagger mtimes across recent past so timestamps ('3d', '2w', ...) and time
+    # sorting ('o') are actually visible in the demo.
+    ages_days = {
+        "地図.png": 0.02, "天気.txt": 0.5, "買い物リスト.txt": 9, "写真": 21,
+        "仕事": 2, "音楽": 120, "映画": 400,
+    }
+    now = time.time()
+    for name, days in ages_days.items():
+        when = now - days * 86400
+        os.utime(base / name, (when, when))
 
 
 def main() -> None:
