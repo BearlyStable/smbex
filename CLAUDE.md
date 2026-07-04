@@ -35,7 +35,7 @@ a slow connection. Target features (full list — most are still ahead):
 | 4 | Background downloads (SMB+SSH) + local mirror + progress UI | **done** |
 | 5 | Prioritization & throttling (browse preempts downloads) | **done** (core; see note) |
 | 6 | Preloader (surrounding folders, toggle) | **done** |
-| 7 | Offline translation (argostranslate) + toggle | **done** |
+| 7 | Offline translation (CTranslate2 + SentencePiece) + toggle | **done** |
 | 8 | Polish (help, reconnect, config, theming) | handed off |
 
 > Phase 5 note: the throttle (browse preempts an in-flight download between chunks)
@@ -52,19 +52,21 @@ a slow connection. Target features (full list — most are still ahead):
 > (grandchildren) or the current dir's same-level siblings — the current set is the
 > ranger "surrounding folders" neighbourhood, one hop in each direction.
 
-> Phase 7 note: filename translation is local-only (`smbex/translate.py`,
-> `ArgosTranslator`). Configure a source language with `--translate <lang>`; `t`
-> toggles the English column, shown beside the original (extensions preserved),
-> session-cached. **Privacy by construction:** inference runs on-box via
-> argostranslate/CTranslate2 — no filename leaves the machine — and the translate
-> path never calls the argos package index. The *only* networked step is the
-> explicit `python -m smbex --install-lang <lang>` (downloads the `.argosmodel`);
-> at runtime, if the model is missing the status bar names that command.
-> argostranslate is a lazy, optional, non-apt dependency: absent package/model
-> degrades to showing originals. Tests use a `FakeTranslator` (offline); a real
-> argos round-trip is an `@pytest.mark.integration` test that skips when absent.
-> Not done: language auto-detection (source is user-specified); smarter handling of
-> `snake_case`/compound filenames (currently the stem is translated as one token).
+> Phase 7 note: filename translation is local-only and lean (`smbex/translate.py`,
+> `Ct2Translator`). It drives an Argos model **directly** with CTranslate2 (inference)
+> + SentencePiece (tokeniser) — deliberately not the `argostranslate` library, whose
+> `stanza -> torch` pull is ~5 GB of unused CUDA; runtime is ~65 MB and output is
+> identical for filenames (same model, same `translate_batch` params incl.
+> `replace_unknowns`/`length_penalty=0.2`). Configure a source language with
+> `--translate <lang>`; `t` toggles the English column beside the original
+> (extensions preserved), session-cached. **Privacy by construction:** inference is
+> on-box and the translate path never hits the network — the *only* networked step is
+> `--install-lang <lang>` (stdlib `urllib`+`zipfile` fetch/unpack of the one
+> `.argosmodel` file; `--model-file` installs a local one). Missing model → originals
+> shown + a status-bar hint. Tests: `FakeTranslator` (offline) + a synthetic-zip
+> install/discovery unit test; real ja→en round-trips are `@pytest.mark.integration`,
+> skipped when the model/engine is absent. Not done: language auto-detection (source
+> is user-specified); smarter `snake_case`/compound handling (stem is one token).
 
 **Definition of done for any feature: its tests pass AND the code is committed.**
 Commit once per completed phase (or smaller), with green tests in that commit.
@@ -87,11 +89,6 @@ Smaller items raised in discussion (not blocking):
   Wire it through `Column`/`columns.py` rendering, keyed off `browser.cache` and the
   `DownloadManager.items` (index by `remote_path`). Keep it a pure render concern —
   no new backend calls; the markers read existing in-memory state. Respect dark mode.
-- **Leaner translation install.** `argostranslate` 1.11 → `stanza` → `torch` pulls a
-  ~5 GB CUDA stack (CPU torch index cuts it to ~1–1.5 GB; see Install). Investigate a
-  smaller footprint: pin a stanza-free argostranslate, or vendor just `ctranslate2` +
-  `sentencepiece` + a light sentence splitter and drive the model directly. `translate.py`
-  already isolates the argos calls, so a backend swap is contained.
 - **Download reordering.** The download queue is FIFO with no way to prioritize one
   transfer; consider a "jump to front" key on the task panel.
 - **On-demand folder sizes.** Not shown today (see Key decisions). If wanted: a key
@@ -136,34 +133,30 @@ Approximate versions in Kali rolling (Debian sid), confirmed on packages.debian.
 | textual | `python3-textual` | 8.2.3 | 8.2.8 | needs the theme API (Textual ≳ 2.x; sid is fine, Debian *stable* trixie=2.1.2 ok, bookworm=0.1.13 **too old**) |
 | pytest | `python3-pytest` | — | 9.1.1 | dev/test |
 | pytest-asyncio | `python3-pytest-asyncio` | 1.4.0 | 1.4.0 | dev/test; `asyncio_mode=auto` set in pyproject |
-| **argostranslate** | **none** | — | (translation) | **NOT in apt.** Optional; install into a venv (below). Models are downloaded `.argosmodel` files. |
+| ctranslate2 | **none** | — | 4.8.1 | **NOT in apt.** Translation inference engine; small wheel. |
+| sentencepiece | `python3-sentencepiece` | 0.2.x | 0.2.1 | Tokeniser. In apt, but pip-installing it with ctranslate2 is simplest. |
 
-> Translation is opt-in and lazy-imported: the core app stays fully functional and
-> testable without `argostranslate`. To enable it on Kali without disturbing the
-> apt-only core, build a venv that **inherits** the apt packages and adds the
-> translation stack:
+> Translation is opt-in and lazy-imported: the core app is fully functional and
+> testable without it. The engine is **CTranslate2 + SentencePiece driving an Argos
+> model directly** — *not* the `argostranslate` library (whose `stanza -> torch`
+> pull is ~5 GB of unused CUDA; see Key decisions). Runtime deps are ~65 MB. To keep
+> the apt-only core untouched, use a venv that **inherits** the apt packages:
 >
 > ```sh
 > python3 -m venv --system-site-packages ~/.venvs/smbex   # sees apt impacket/paramiko/textual
-> # CPU-only torch — see the footprint warning below; without the CPU index you get ~5 GB:
-> ~/.venvs/smbex/bin/pip install \
->   --index-url https://download.pytorch.org/whl/cpu \
->   --extra-index-url https://pypi.org/simple  argostranslate
-> ~/.venvs/smbex/bin/python -m smbex --install-lang ja      # one-time, online: fetch the ja->en model
+> ~/.venvs/smbex/bin/pip install ctranslate2 sentencepiece   # ~65 MB, no torch/CUDA
+> ~/.venvs/smbex/bin/python -m smbex --install-lang ja      # one-time, online: fetch the ja->en model (~130 MB)
 > ~/.venvs/smbex/bin/python -m smbex --translate ja user@host   # run; 't' toggles the English column
 > ```
 >
-> No `--break-system-packages`, no re-installing the core via pip. Inference is fully
-> on-box (CTranslate2); no filename leaves the machine. If the model is absent the app
-> just shows originals and the status bar prints the `--install-lang` hint.
->
-> **⚠ Footprint.** `argostranslate` (1.11) hard-depends on `stanza`, which pulls
-> `torch`; a plain `pip install argostranslate` drags in ~2.7 GB of `nvidia-*` CUDA
-> wheels + torch + triton — **~5 GB total** for a job that only uses `ctranslate2`
-> (torch/stanza are never needed to translate filenames). Installing from the
-> **CPU torch index** (above) drops the CUDA/triton wheels (~3.4 GB saved, verified
-> via `pip install --dry-run`), leaving ~1–1.5 GB. Leaner still would mean pinning
-> an older, stanza-free argostranslate — untried; flagged in the backlog.
+> A language is **one `.argosmodel` file** (a zip of `model/` + `sentencepiece.model`
+> + `metadata.json`). `--install-lang ja` fetches it (stdlib `urllib`+`zipfile`, via
+> the Argos index) into `~/.local/share/smbex/models/`; `--install-lang ja --model-file
+> X.argosmodel` installs a pre-downloaded one (offline / air-gapped). Models from an
+> existing `argostranslate` install under `~/.local/share/argos-translate/packages`
+> are auto-discovered and reused. No `--break-system-packages`, no core reinstall.
+> Inference is on-box; no filename leaves the machine. If the model is absent the app
+> shows originals and the status bar prints the `--install-lang` hint.
 
 ### Dev (venv, any distro)
 
@@ -212,7 +205,7 @@ smbex/
   browser.py             ✓ ranger navigation controller (cache-backed, cursor memory)
   download.py            ✓ background DownloadManager (resume/skip, mirror, throttled; one handle/file)
   preload.py             ✓ surrounding-folder preloader (PRELOAD-priority, toggle-gated)
-  translate.py           ✓ local offline filename translation (lazy argostranslate)
+  translate.py           ✓ local filename translation (CTranslate2 + SentencePiece; lazy)
   ui/
     app.py               ✓ Textual ranger UI (parent|current|preview, dark default)
     columns.py           ✓ Miller-column widget
@@ -241,7 +234,8 @@ tests/                   pytest; FakeBackend + live SMB server fixtures
 
 ## Conventions
 - Test-first where practical; a feature isn't done until tests pass and it's committed.
-- Keep the core importable and testable **without** `argostranslate` (lazy import).
+- Keep the core importable and testable **without** the translation engine
+  (`ctranslate2`/`sentencepiece` imported lazily).
 - The listing cache is **session-only**; do not add disk persistence.
 - Match the existing style: `from __future__ import annotations`, type hints,
   small modules, docstrings that state constraints (not narration).
@@ -249,7 +243,7 @@ tests/                   pytest; FakeBackend + live SMB server fixtures
 
 ## Key decisions (and why)
 - **Python, not Rust**: `impacket` gives free auth parity with `impacket-smbclient`
-  and is already on Kali; `argostranslate` matches "one downloadable file per
+  and is already on Kali; the Argos model format matches "one downloadable file per
   language" for offline translation; Textual is async-native (fits background
   downloads + preload). Rust would mean a single static binary but sacrifice auth
   breadth and offline translation.
@@ -261,11 +255,14 @@ tests/                   pytest; FakeBackend + live SMB server fixtures
 - **Folder sizes aren't shown** because neither SMB nor SFTP can report a
   directory's recursive size without walking it; if added, do it on demand at low
   priority and cache it (SSH could shell out to `du -sb`), never eagerly per listing.
-- **argostranslate is pip-only (not apt)** — the one dependency outside apt, so
-  translation is optional and lazy-imported; the apt-only core stays fully functional
-  without it. Enable it via a `--system-site-packages` venv (see Install & environment).
+- **CTranslate2 + SentencePiece, not the `argostranslate` library** — same Argos
+  model and identical filename output, but ~65 MB of runtime instead of ~5 GB:
+  `argostranslate` hard-depends on `stanza`→`torch` (CUDA), used only for sentence
+  segmentation that filenames don't need. `smbex/translate.py` drives the model dir
+  directly (verified identical on the demo vocabulary). These deps are pip-only (not
+  apt), so translation stays optional/lazy — enable via a `--system-site-packages`
+  venv (see Install & environment).
 - **Translation is on-box only** — chosen over any cloud/API translator because
-  filenames must not leave the machine. argostranslate/CTranslate2 runs the model
-  locally; `smbex/translate.py` only ever touches the installed model at translate
-  time (never the argos package index), so the sole network use is the deliberate
-  `--install-lang` model download.
+  filenames must not leave the machine. CTranslate2 runs the model locally;
+  `smbex/translate.py` touches only the installed model at translate time, so the
+  sole network use is the deliberate `--install-lang` model fetch.

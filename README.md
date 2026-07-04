@@ -28,21 +28,19 @@ cd /path/to/smbex
 python3 -m smbex --version
 ```
 
-The offline translation engine (`argostranslate`) is **not** in apt and is only
-needed for filename translation. Add it in a venv that inherits the apt packages.
-Use the **CPU torch index** — a plain `pip install argostranslate` drags in ~5 GB
-of CUDA/torch wheels it never uses (see CLAUDE.md → *Install*):
+Filename translation is optional and needs two small wheels (**not** in apt) —
+CTranslate2 + SentencePiece (~65 MB, no torch/CUDA). Add them in a venv that
+inherits the apt packages, then fetch a language model (one `.argosmodel` file):
 
 ```sh
 python3 -m venv --system-site-packages ~/.venvs/smbex
-~/.venvs/smbex/bin/pip install \
-  --index-url https://download.pytorch.org/whl/cpu \
-  --extra-index-url https://pypi.org/simple  argostranslate
-~/.venvs/smbex/bin/python -m smbex --install-lang ja   # one-time, online: ja->en model
+~/.venvs/smbex/bin/pip install ctranslate2 sentencepiece
+~/.venvs/smbex/bin/python -m smbex --install-lang ja   # one-time, online: ja->en model (~130 MB)
 ```
 
-Translation runs entirely on this machine (no filename leaves the box). See
-CLAUDE.md → *Install* for details.
+Translation runs entirely on this machine (no filename leaves the box); the only
+network use is that one-time model download. See CLAUDE.md → *Install* for details
+(offline `--model-file`, reusing existing Argos models, etc.).
 
 ### Development (any distro, venv)
 

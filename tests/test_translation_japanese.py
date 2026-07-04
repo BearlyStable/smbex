@@ -1,25 +1,27 @@
-"""Japanese end-to-end translation, against the real argostranslate ja->en model.
+"""Japanese end-to-end translation, driving a real ja->en model via CTranslate2 +
+SentencePiece (no argostranslate at runtime).
 
-Marked ``integration``: these run only where argostranslate and the ja->en model
-are installed (``python -m smbex --install-lang ja``); otherwise they skip cleanly,
-so the offline suite is unaffected. They exercise the real model, the extension
-handling, and the in-app 't' toggle over a Japanese-named tree."""
+Marked ``integration``: these run only where ctranslate2/sentencepiece and a ja->en
+model are installed (``python -m smbex --install-lang ja``); otherwise they skip
+cleanly, so the offline suite is unaffected. They exercise the real model, the
+extension handling, and the in-app 't' toggle over a Japanese-named tree."""
 
 from __future__ import annotations
 
 import pytest
 
-from smbex.translate import ArgosTranslator, translate_name
+from smbex.translate import Ct2Translator, translate_name
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(scope="module")
-def ja() -> ArgosTranslator:
-    pytest.importorskip("argostranslate.translate")
-    tr = ArgosTranslator("ja")
+def ja() -> Ct2Translator:
+    pytest.importorskip("ctranslate2")
+    pytest.importorskip("sentencepiece")
+    tr = Ct2Translator("ja")
     if not tr.available:
-        pytest.skip("ja->en argostranslate model not installed (run: smbex --install-lang ja)")
+        pytest.skip("ja->en model not installed (run: python -m smbex --install-lang ja)")
     return tr
 
 

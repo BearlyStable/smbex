@@ -19,10 +19,13 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
 ]
-# Heavy, offline-translation stack. Installed only when working the translation
-# phase (see CLAUDE.md) so the foundation stays lean:  pip install -e ".[translate]"
+# Offline-translation runtime: CTranslate2 (inference) + SentencePiece (tokeniser)
+# drive an Argos-format model directly (~65 MB) — deliberately NOT `argostranslate`,
+# whose stanza->torch pull is ~5 GB of unused CUDA. See CLAUDE.md → Install.
+#   pip install -e ".[translate]"     # then: python -m smbex --install-lang ja
 translate = [
-    "argostranslate>=1.9",
+    "ctranslate2>=4.0",
+    "sentencepiece>=0.2",
 ]
 
 [project.scripts]

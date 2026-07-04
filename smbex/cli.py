@@ -74,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
         "(one-time; the only step that uses the network)",
     )
     ui.add_argument(
+        "--model-file",
+        metavar="FILE",
+        help="with --install-lang: install from this local .argosmodel file instead "
+        "of downloading (offline model setup)",
+    )
+    ui.add_argument(
         "--download-dir",
         metavar="DIR",
         default="downloads",
@@ -108,15 +114,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.install_lang:  # one-time model setup; no host connection needed
-        from smbex.translate import ArgosTranslator
+        from smbex.translate import install_from_file, install_model
 
-        tr = ArgosTranslator(args.install_lang)
-        print(f"Installing {args.install_lang}->en translation model (one-time, needs network)...")
+        code = args.install_lang
         try:
-            tr.install_model()
+            if args.model_file:
+                print(f"Installing {code}->en model from {args.model_file} ...")
+                dest = install_from_file(args.model_file, code)
+            else:
+                print(f"Downloading {code}->en translation model (one-time, needs network)...")
+                dest = install_model(code)
         except Exception as exc:  # noqa: BLE001 - report cleanly and exit non-zero
             raise SystemExit(f"model install failed: {exc}")
-        print(f"Done. Launch with:  --translate {args.install_lang}")
+        print(f"Installed to {dest}.  Launch with:  --translate {code}")
         return 0
 
     if not args.target:
@@ -124,9 +134,9 @@ def main(argv: list[str] | None = None) -> int:
 
     translator = None
     if args.translate:
-        from smbex.translate import ArgosTranslator
+        from smbex.translate import Ct2Translator
 
-        translator = ArgosTranslator(args.translate)
+        translator = Ct2Translator(args.translate)
 
     from smbex.auth import Proto, make_conn_spec
 
