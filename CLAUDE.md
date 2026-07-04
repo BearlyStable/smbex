@@ -68,6 +68,15 @@ a slow connection. Target features (full list — most are still ahead):
 > skipped when the model/engine is absent. Not done: language auto-detection (source
 > is user-specified); smarter `snake_case`/compound handling (stem is one token).
 
+> Status markers note: the current column carries a one-char status gutter
+> (`SmbexApp._entry_markers` → `Column.show(markers=...)`, styled in `columns.py`
+> `MARKER_STYLE`): `·` dir listing cached (`path in browser.cache`), `↓` queued/
+> downloading, `✓` downloaded, `✗` error. Folders aggregate the `DownloadManager.items`
+> beneath them; files match their own `remote_path`. Pure render over in-memory state
+> (no backend calls); re-rendered live on download progress via `_on_downloads_change`.
+> Tested in `tests/test_ui_markers.py`. Only the current column is marked (its
+> `child_path` is the correct base); parent/preview are left plain.
+
 **Definition of done for any feature: its tests pass AND the code is committed.**
 Commit once per completed phase (or smaller), with green tests in that commit.
 
@@ -77,18 +86,25 @@ Remaining phases:
 - **Phase 8 — Polish.** Help screen, reconnect/error recovery, config file, theming.
 
 Smaller items raised in discussion (not blocking):
-- **Listing status markers (UI).** Show state inline in the file/folder listing so
-  the user can see, at a glance, what's already local vs. remote:
-  - **folder already cached** (its listing is in `ListingCache`) — e.g. a dim marker
-    or colour on directories whose path is `in browser.cache`; useful once preload is
-    on, to see how far the neighbourhood has warmed.
-  - **queued/added to the download queue** — files or folders enqueued but not yet
-    finished (`DownloadItem.status` in `queued`/`running`).
-  - **already downloaded** — present and complete locally (`status` `done`/`skipped`,
-    or the mirror file exists at full size).
-  Wire it through `Column`/`columns.py` rendering, keyed off `browser.cache` and the
-  `DownloadManager.items` (index by `remote_path`). Keep it a pure render concern —
-  no new backend calls; the markers read existing in-memory state. Respect dark mode.
+- **Timestamps + sort by time (NEXT).** Show entry modification times in the listing
+  and allow sorting by them. The data is already in hand: `DirEntry.mtime` is populated
+  by both backends, and **`mtime` is the only cross-protocol timestamp** — SMB
+  (impacket) exposes creation/write/access/change FILETIMEs (`get_ctime_epoch` =
+  *creation*, `get_mtime_epoch` = write, `get_atime_epoch` = access), but SFTP v3
+  (paramiko) exposes only `st_mtime`/`st_atime`. So base the feature on mtime; a
+  richer per-protocol view (SMB creation/change) is optional and SMB-only.
+  - Display: a right-aligned relative/short time column in `columns.py` (guard the
+    `mtime == 0` "unknown" case). SMB times are UTC FILETIME→epoch; SFTP is server
+    local epoch — label/format consistently, don't imply false precision.
+  - Sort: add a sort key toggle in `browser._sort` (name ↔ mtime, asc/desc); a
+    keybind (e.g. `o`/`O` like ranger's order menu) and show the active order in the
+    status bar. Keep dirs-first optional.
+  - **Recursive "latest modified in subtree" is NOT free.** A folder's own mtime only
+    reflects add/remove/rename of its *direct* entries — not deep edits or in-place
+    file changes (true on NTFS-over-SMB and POSIX-over-SFTP alike). To show "newest
+    thing anywhere under here" you must walk the tree (max mtime) — do it on demand at
+    low priority and cache it, exactly like the on-demand folder-size item; SSH can
+    shortcut with `find DIR -printf '%T@\n' | sort -n | tail -1`.
 - **Download reordering.** The download queue is FIFO with no way to prioritize one
   transfer; consider a "jump to front" key on the task panel.
 - **On-demand folder sizes.** Not shown today (see Key decisions). If wanted: a key

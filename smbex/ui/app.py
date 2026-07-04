@@ -175,6 +175,50 @@ class SmbexApp(App):
             return None
         return translate_name(self._translator, entry.name, entry.is_dir)
 
+    def _entry_markers(self, entries: list) -> list[str] | None:
+        """One status glyph per current-dir entry, from in-memory state only.
+
+        ``↓`` queued/downloading, ``✓`` downloaded, ``✗`` error, ``·`` listing cached
+        (dirs), space otherwise. A folder aggregates the download items beneath it;
+        a file matches its own remote path. No backend calls.
+        """
+        if not entries:
+            return None
+        items = self._downloads.items
+        cache = self.browser.cache
+        markers: list[str] = []
+        for entry in entries:
+            path = self.browser.child_path(entry.name)
+            if entry.is_dir:
+                prefix = path + "/"
+                rel = [it for it in items if it.remote_path == path or it.remote_path.startswith(prefix)]
+            else:
+                rel = [it for it in items if it.remote_path == path]
+            glyph = " "
+            if rel:
+                statuses = {it.status for it in rel}
+                if statuses & {"queued", "running"}:
+                    glyph = "↓"
+                elif "error" in statuses:
+                    glyph = "✗"
+                elif statuses <= {"done", "skipped"}:
+                    glyph = "✓"
+            if glyph == " " and entry.is_dir and path in cache:
+                glyph = "·"
+            markers.append(glyph)
+        return markers
+
+    def _render_current(self) -> None:
+        """(Re)render the current column from in-memory state — cheap, no fetch."""
+        browser = self.browser
+        self.query_one("#current", Column).show(
+            browser.entries,
+            cursor=browser.cursor,
+            active=True,
+            translations=self._entry_translations(browser.entries),
+            markers=self._entry_markers(browser.entries),
+        )
+
     # --- download actions -----------------------------------------------------
     async def action_download(self) -> None:
         sel = self.browser.selected
@@ -215,12 +259,7 @@ class SmbexApp(App):
         self.query_one("#parent", Column).show(
             parent, cursor=browser.parent_cursor(parent), translations=self._entry_translations(parent)
         )
-        self.query_one("#current", Column).show(
-            browser.entries,
-            cursor=browser.cursor,
-            active=True,
-            translations=self._entry_translations(browser.entries),
-        )
+        self._render_current()
         preview_col = self.query_one("#preview", Column)
         if preview is None:
             preview_col.show_file(browser.selected, translated=self._name_translation(browser.selected))
@@ -235,6 +274,7 @@ class SmbexApp(App):
     def _on_downloads_change(self) -> None:
         try:
             self._refresh_downloads()
+            self._render_current()  # keep the status gutter in sync with progress
         except Exception:
             pass  # widgets may be gone during teardown
 

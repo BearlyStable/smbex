@@ -20,6 +20,15 @@ def human_size(n: int) -> str:
     return f"{size:.1f}T"
 
 
+#: Style for each status-gutter glyph (see SmbexApp._entry_markers for the source).
+MARKER_STYLE = {
+    "↓": "yellow",     # queued / downloading
+    "✓": "green",      # downloaded / complete
+    "✗": "bold red",   # download error
+    "·": "dim",        # listing already cached
+}
+
+
 class Column(Static):
     #: The entries currently displayed, and the rendered plain text (for tests).
     shown: list[DirEntry] = []
@@ -31,15 +40,20 @@ class Column(Static):
         cursor: int | None = None,
         active: bool = False,
         translations: list[str] | None = None,
+        markers: list[str] | None = None,
     ) -> None:
-        """Render the listing. If ``translations`` (parallel to ``entries``) is
-        given, each English rendering is shown beside its original name."""
+        """Render the listing. ``translations`` (parallel to ``entries``) shows each
+        English rendering beside the original name; ``markers`` prefixes each row with
+        a one-char status glyph (cached / queued / downloaded)."""
         self.shown = entries
         text = Text(no_wrap=True, overflow="ellipsis")
         if not entries:
             text.append("(empty)", style="dim italic")
         name_width = max((len(e.name) + (1 if e.is_dir else 0) for e in entries), default=0)
         for i, entry in enumerate(entries):
+            if markers is not None:
+                glyph = markers[i] if i < len(markers) else " "
+                text.append(glyph + " ", style=MARKER_STYLE.get(glyph, ""))
             label = (entry.name + ("/" if entry.is_dir else "")).ljust(name_width)
             if cursor == i:
                 style = "reverse" if active else "bold"
