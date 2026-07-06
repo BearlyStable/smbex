@@ -155,6 +155,22 @@ a slow connection. Feature list (all implemented — phases 0–9 done):
 > Tested in `tests/test_ui_markers.py`. Only the current column is marked (its
 > `child_path` is the correct base); parent/preview are left plain.
 
+> Layout note: listings render as a `rich` `Table.grid` (`Column.show`) — a flexible
+> name(+translation) column that truncates with an ellipsis, plus fixed right-aligned
+> size and age columns, so metadata stays put at any width even with translation on.
+> `Column.rendered_text` is a plain-text side-channel for tests. Parent/preview columns
+> are toggleable (`[`/`]`, `--parent`/`--preview`, config `parent`/`preview`); a hidden
+> column skips its fetch (`_refresh`) and render — saves a round-trip on a slow link.
+
+> Preview note: when the selected file is fully downloaded (`_downloaded_local_path`:
+> mirror file exists and complete), the preview pane shows its **local** content via
+> `smbex/preview.py` — text as-is, binary as an xxd-style hex dump — reading only a
+> bounded prefix (64 KB text / 2 KB hex) so a huge file can't stall the UI. With
+> translate on, `_maybe_translate_preview` translates the first ~40 lines off the event
+> loop in an *exclusive* worker (switching files cancels a stale one) and appends a
+> "── translation ──" section. Not-downloaded files show metadata only. Tested in
+> `tests/test_preview.py`.
+
 **Definition of done for any feature: its tests pass AND the code is committed.**
 Commit once per completed phase (or smaller), with green tests in that commit.
 
@@ -188,8 +204,8 @@ Actual keybindings today: `h/j/k/l`+arrows, `g`/`G`, `l`/`Enter` open, `h` up,
 panel, `o` cycle sort (name→newest→oldest), `p` preload toggle (prefetches
 surrounding folders), `r` reconnect (after a dropped link; auto only with
 `--auto-reconnect`), `t` translate toggle (English beside originals; needs
-`--translate <lang>`), `T` cycle colour theme (dark/light/nord/gruvbox), `?` help
-overlay, `q` quit.
+`--translate <lang>`), `T` cycle colour theme (dark/light/nord/gruvbox),
+`[`/`]` show/hide the parent/preview column, `?` help overlay, `q` quit.
 
 ## Install & environment
 
@@ -292,6 +308,7 @@ smbex/
   gateway.py             ✓ async priority-queue gateway (browse preempts download; reconnect/retry)
   cache.py               ✓ in-memory, session-only listing cache
   config.py              ✓ INI config (~/.config/smbex/config.ini); built-in<config<CLI
+  preview.py             ✓ bounded text/hex preview of a downloaded file
   browser.py             ✓ ranger navigation controller (cache-backed, cursor memory)
   download.py            ✓ background DownloadManager (resume/skip, mirror, throttled; one handle/file)
   preload.py             ✓ surrounding-folder preloader (PRELOAD-priority, toggle-gated)

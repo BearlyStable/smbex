@@ -83,6 +83,8 @@ Optional extras: `--preload` prefetches surrounding folders (toggle with `p`);
 Press `?` for the key reference. If a link drops it's reported and you press `r`
 to reconnect (a deliberate new login); `--auto-reconnect` heals silently instead.
 `--theme <name>` (dark/light/nord/gruvbox) sets the colour theme; `T` switches it.
+`[` / `]` hide the parent / preview column to save space. A downloaded file's
+content shows in the preview pane (text, or an xxd-style hex dump for binaries).
 
 Defaults live in a config file (`~/.config/smbex/config.ini`; flags override it):
 
