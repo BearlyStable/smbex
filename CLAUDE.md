@@ -273,9 +273,16 @@ python3 -m venv .venv
 
 ```sh
 .venv/bin/python -m pytest -q                 # unit + Textual Pilot tests (fast, offline)
-.venv/bin/python -m pytest -m integration     # real local SMB/SSH servers (Phase 1+)
+.venv/bin/python -m pytest -m integration     # real local SMB/SSH/FTP servers
 .venv/bin/python -m smbex --version
+.venv/bin/python -m smbex --help              # ends with the QUICKSTART epilog (cli.QUICKSTART)
 ```
+
+**Release**: `bash scripts/make_release.sh` writes `dist/smbex.pyz` (single-file
+zipapp; bundles only smbex's pure-Python code — deps stay apt/pip on the target),
+`dist/smbex-<ver>.tar.gz` (source), and `dist/QUICKSTART.txt`. `smbex --help`'s
+epilog is `cli.QUICKSTART` (connect / config / one-time translation-model setup with
+the Argos index URL) — a single source of truth reused by the release script.
 
 ## Architecture
 

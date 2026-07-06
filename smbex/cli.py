@@ -15,10 +15,37 @@ def _safe(host: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", host) or "host"
 
 
+QUICKSTART = """\
+quickstart
+----------
+Connect (SMB / SSH / FTP), then press '?' in-app for all keys:
+  smbex 'DOMAIN/user:pass@host'      SMB (impacket-style; -H hash, -k kerberos)
+  smbex 'ssh://user@host:22/path'    SSH / SFTP
+  smbex 'ftp://user@host'            FTP (ftps:// for TLS; no user = anonymous)
+  h/j/k/l move, l/Enter open, d download, [ ] hide columns, q quit.
+
+Config file (your defaults; command-line flags still override it):
+  smbex --write-config               writes ~/.config/smbex/config.ini, then edit it
+  keys: preload, auto_reconnect, sort, theme, parent, preview, translate, download_dir
+
+Offline filename translation (optional; runs entirely on this machine):
+  1. engine (once):   pip install ctranslate2 sentencepiece
+  2. language model:  smbex --install-lang ja
+       fetches one .argosmodel from the Argos package index:
+       https://raw.githubusercontent.com/argosopentech/argospm-index/main/index.json
+       air-gapped? download the .argosmodel yourself, then:
+       smbex --install-lang ja --model-file translate-ja_en-1_1.argosmodel
+  3. use it:          smbex --translate ja 'user@host'     (toggle in-app with 't')
+     Note the code is 'ja' (not 'jp'). Nothing is ever sent off the machine.
+"""
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="smbex",
-        description="Terminal explorer for remote hosts over SMB and SSH/SFTP.",
+        description="Terminal explorer for remote hosts over SMB, SSH/SFTP and FTP.",
+        epilog=QUICKSTART,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "target",

@@ -92,6 +92,27 @@ Defaults live in a config file (`~/.config/smbex/config.ini`; flags override it)
 python3 -m smbex --write-config          # drop a commented sample, then edit it
 ```
 
+`smbex --help` ends with a **quickstart** covering connecting, the config file, and
+the one-time translation-model setup (with the model index URL).
+
+## Build a release to transfer
+
+`scripts/make_release.sh` writes transferable artifacts to `dist/`:
+
+```sh
+bash scripts/make_release.sh
+```
+
+- **`dist/smbex.pyz`** — a single-file [zipapp](https://docs.python.org/3/library/zipapp.html).
+  Copy it to the target and run it; it needs only `python3` plus the runtime deps
+  (on Kali: `sudo apt install python3-impacket python3-paramiko python3-textual`):
+
+  ```sh
+  python3 smbex.pyz 'demo:demo@127.0.0.1' --port 4455   # or: ./smbex.pyz
+  ```
+- **`dist/smbex-<ver>.tar.gz`** — the source tree (run from it with `python3 -m smbex`).
+- **`dist/QUICKSTART.txt`** — the same quickstart shown at the end of `--help`.
+
 ## Try it out (local demo, no root)
 
 Terminal 1 — start a throwaway SMB server with sample files on a high port:

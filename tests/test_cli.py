@@ -27,6 +27,15 @@ def test_preload_defaults_off_and_is_opt_in():
     assert build_parser().parse_args(["host", "--preload"]).preload is True
 
 
+def test_help_has_quickstart_and_setup():
+    text = build_parser().format_help()
+    assert "quickstart" in text.lower()
+    assert "--write-config" in text  # config setup
+    assert "--install-lang" in text  # translation model install
+    assert "argospm-index" in text  # the model index URL
+    assert "ftp://" in text and "ssh://" in text  # all three protocols
+
+
 def test_translation_flags():
     args = build_parser().parse_args(["host", "--translate", "de"])
     assert args.translate == "de"
