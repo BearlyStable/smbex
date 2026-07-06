@@ -27,6 +27,7 @@ _SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("w", "show / hide the task panel"),
     ]),
     ("View", [
+        ("[  ]", "show / hide the parent / preview column"),
         ("p", "preload surrounding folders (on / off)"),
         ("t", "translate filenames to English (on / off)"),
         ("T", "switch colour theme (dark / light / …)"),

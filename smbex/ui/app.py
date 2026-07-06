@@ -78,6 +78,8 @@ class SmbexApp(App):
         Binding("o", "cycle_sort", "Sort"),
         Binding("r", "reconnect", "Reconnect"),
         Binding("T", "cycle_theme", "Theme"),
+        Binding("[", "toggle_parent", "Parent col"),
+        Binding("]", "toggle_preview", "Preview col"),
         Binding("question_mark", "help", "Help"),
     ]
 
@@ -92,10 +94,14 @@ class SmbexApp(App):
         translator: Translator | None = None,
         sort: str = "name",
         theme: str = "dark",
+        show_parent: bool = True,
+        show_preview: bool = True,
     ):
         super().__init__()
         self._gateway = gateway
         self._theme_pref = theme
+        self._show_parent = show_parent
+        self._show_preview = show_preview
         self.browser = Browser(gateway, preload=preload)
         self.browser.sort_mode = SORT_BY_LABEL.get(sort, "name")  # initial view sort
         self._downloads = DownloadManager(gateway, Path(download_root))
@@ -122,6 +128,8 @@ class SmbexApp(App):
 
     async def on_mount(self) -> None:
         self.theme = self._resolve_theme(self._theme_pref)  # dark by default
+        self.query_one("#parent", Column).set_class(not self._show_parent, "hidden")
+        self.query_one("#preview", Column).set_class(not self._show_preview, "hidden")
         self._gateway.on_status = self._on_conn_status  # surface reconnect state
         await self._gateway.start()
         self._downloads.on_change = self._on_downloads_change
@@ -185,6 +193,16 @@ class SmbexApp(App):
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen())
+
+    async def action_toggle_parent(self) -> None:
+        self._show_parent = not self._show_parent
+        self.query_one("#parent", Column).set_class(not self._show_parent, "hidden")
+        await self._refresh()  # (re)fetch the parent listing if newly shown
+
+    async def action_toggle_preview(self) -> None:
+        self._show_preview = not self._show_preview
+        self.query_one("#preview", Column).set_class(not self._show_preview, "hidden")
+        await self._refresh()
 
     def _resolve_theme(self, name: str) -> str:
         """Map a friendly/config theme name to a registered Textual theme."""
@@ -306,25 +324,32 @@ class SmbexApp(App):
         # The parent/preview columns fetch (cache-backed); tolerate a dropped link and
         # just leave them empty. The current column renders from in-memory entries (no
         # fetch), so a drop never blanks the view you're on — and it renders *after*
-        # the preview fetch so its cache marker reflects the just-warmed child.
-        try:
-            parent = await browser.parent_entries()
-        except Exception:
-            parent = []
-        try:
-            preview = await browser.preview_entries()
-        except Exception:
-            preview = None
+        # the preview fetch so its cache marker reflects the just-warmed child. Hidden
+        # columns skip their fetch entirely (saves a round-trip on a slow link).
+        parent: list = []
+        if self._show_parent:
+            try:
+                parent = await browser.parent_entries()
+            except Exception:
+                parent = []
+        preview = None
+        if self._show_preview:
+            try:
+                preview = await browser.preview_entries()
+            except Exception:
+                preview = None
 
         self._render_current()
-        self.query_one("#parent", Column).show(
-            parent, cursor=browser.parent_cursor(parent), translations=self._entry_translations(parent)
-        )
-        preview_col = self.query_one("#preview", Column)
-        if preview is None:
-            preview_col.show_file(browser.selected, translated=self._name_translation(browser.selected))
-        else:
-            preview_col.show(preview, translations=self._entry_translations(preview))
+        if self._show_parent:
+            self.query_one("#parent", Column).show(
+                parent, cursor=browser.parent_cursor(parent), translations=self._entry_translations(parent)
+            )
+        if self._show_preview:
+            preview_col = self.query_one("#preview", Column)
+            if preview is None:
+                preview_col.show_file(browser.selected, translated=self._name_translation(browser.selected))
+            else:
+                preview_col.show(preview, translations=self._entry_translations(preview))
         self._refresh_downloads()
 
     def _refresh_downloads(self) -> None:

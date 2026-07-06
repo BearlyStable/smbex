@@ -82,6 +82,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="colour theme: dark, light, nord, gruvbox, … (switch in-app with 'T'; default: dark)",
     )
     ui.add_argument(
+        "--parent",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="show the parent-folder column (toggle in-app with '['; --no-parent to save space)",
+    )
+    ui.add_argument(
+        "--preview",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="show the preview column (toggle in-app with ']'; --no-preview to save space)",
+    )
+    ui.add_argument(
         "--config",
         metavar="FILE",
         help="config file to read (default: ~/.config/smbex/config.ini)",
@@ -224,6 +236,8 @@ def main(argv: list[str] | None = None) -> int:
             translator=translator,
             sort=args.sort,
             theme=args.theme,
+            show_parent=args.parent,
+            show_preview=args.preview,
         ).run()
         return 0
 
@@ -249,5 +263,7 @@ def main(argv: list[str] | None = None) -> int:
         translator=translator,
         sort=args.sort,
         theme=args.theme,
+        show_parent=args.parent,
+        show_preview=args.preview,
     ).run()
     return 0

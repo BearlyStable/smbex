@@ -18,7 +18,7 @@ import os
 from pathlib import Path
 
 # Keys mirrored to argparse dests; the rest are treated as strings.
-_BOOL_KEYS = ("preload", "auto_reconnect")
+_BOOL_KEYS = ("preload", "auto_reconnect", "parent", "preview")
 _STR_KEYS = ("translate", "sort", "theme", "download_dir")
 
 _SAMPLE = """\
@@ -42,6 +42,11 @@ sort = name
 
 # Colour theme: dark | light | nord | gruvbox (or any Textual theme name).
 theme = dark
+
+# Show the parent / preview columns (true/false). Turn off to save screen space;
+# toggle in-app with '[' (parent) and ']' (preview).
+parent = true
+preview = true
 
 # Local root for downloads (the remote tree is mirrored under DIR/<host>).
 download_dir = downloads
