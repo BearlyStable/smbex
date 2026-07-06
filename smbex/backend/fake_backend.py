@@ -49,6 +49,27 @@ class FakeBackend:
         self.events: list[str] = []
         self.read_gates: dict[str, threading.Event] = {}
         self.closed = False
+        # Reconnect simulation: drop_next ops raise ConnectionError; reconnect_fails
+        # reconnect attempts raise; reconnects counts successful reconnects.
+        self.drop_next = 0
+        self.reconnect_fails = 0
+        self.reconnects = 0
+
+    def _maybe_drop(self, where: str) -> None:
+        if self.drop_next > 0:
+            self.drop_next -= 1
+            self.events.append(f"drop:{where}")
+            raise ConnectionError(f"simulated connection drop during {where}")
+
+    def is_connection_error(self, exc: BaseException) -> bool:
+        return isinstance(exc, ConnectionError)
+
+    def reconnect(self) -> None:
+        if self.reconnect_fails > 0:
+            self.reconnect_fails -= 1
+            raise ConnectionError("simulated reconnect failure")
+        self.reconnects += 1
+        self.events.append("reconnect")
 
     @staticmethod
     def _parts(path: str) -> list[str]:
@@ -79,6 +100,7 @@ class FakeBackend:
         gate = self.gates.get(path)
         if gate is not None:  # block until the test releases us
             gate.wait()
+        self._maybe_drop(f"list:{path}")
         self.exec_order.append(path)
         self.events.append(f"list:{path}")
         node = self._resolve(path)

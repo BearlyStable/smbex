@@ -90,6 +90,7 @@ class SmbexApp(App):
         self._translator = translator
         # On when a language was configured (--translate); 't' toggles the display.
         self.translate_enabled = translator is not None
+        self._conn_state = "connected"  # updated by the gateway on link changes
 
     @property
     def downloads(self) -> DownloadManager:
@@ -107,6 +108,7 @@ class SmbexApp(App):
 
     async def on_mount(self) -> None:
         self.theme = "textual-dark"  # dark by default
+        self._gateway.on_status = self._on_conn_status  # surface reconnect state
         await self._gateway.start()
         self._downloads.on_change = self._on_downloads_change
         self._downloads.start()
@@ -283,6 +285,14 @@ class SmbexApp(App):
         except Exception:
             pass  # widgets may be gone during teardown
 
+    def _on_conn_status(self, state: str) -> None:
+        """Gateway link-state callback ('reconnecting'/'connected'/'disconnected')."""
+        self._conn_state = state
+        try:
+            self._update_status()
+        except Exception:
+            pass  # widgets may be gone during teardown
+
     def _update_status(self) -> None:
         browser = self.browser
         total = browser.cache.hits + browser.cache.misses
@@ -305,7 +315,16 @@ class SmbexApp(App):
             else:
                 xl8 = f"{t.from_code}: no model (--install-lang {t.from_code})"
             text += f" │ xl8:{xl8}"
-        self.query_one("#status", Static).update(text)
+        if self._conn_state == "connected":
+            self.query_one("#status", Static).update(text)
+        else:
+            # Link down/recovering: lead with a prominent, coloured banner.
+            banner = "⟳ reconnecting…" if self._conn_state == "reconnecting" else "⚠ disconnected"
+            style = "bold yellow" if self._conn_state == "reconnecting" else "bold red"
+            line = Text(" ")
+            line.append(banner, style=style)
+            line.append(text)
+            self.query_one("#status", Static).update(line)
 
     def _status_error(self, exc: Exception) -> None:
         self.query_one("#status", Static).update(Text(f" error: {exc}", style="bold red"))

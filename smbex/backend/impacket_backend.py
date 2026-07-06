@@ -36,11 +36,12 @@ class _SmbFile:
 
 
 class ImpacketBackend:
-    def __init__(self, conn):
+    def __init__(self, conn, auth: SmbAuth | None = None):
         self._conn = conn
+        self._auth = auth  # retained so the gateway can reconnect after a drop
 
-    @classmethod
-    def connect(cls, auth: SmbAuth) -> "ImpacketBackend":
+    @staticmethod
+    def _open(auth: SmbAuth):
         from impacket.smbconnection import SMBConnection
 
         conn = SMBConnection(auth.remote_name, auth.remote_host, sess_port=auth.port)
@@ -48,7 +49,28 @@ class ImpacketBackend:
             conn.kerberosLogin(**smb_kerberos_kwargs(auth))
         else:
             conn.login(**smb_login_kwargs(auth))
-        return cls(conn)
+        return conn
+
+    @classmethod
+    def connect(cls, auth: SmbAuth) -> "ImpacketBackend":
+        return cls(cls._open(auth), auth)
+
+    def reconnect(self) -> None:
+        if self._auth is None:
+            raise RuntimeError("no stored credentials to reconnect")
+        try:
+            self._conn.close()  # drop the dead socket (local, fast)
+        except Exception:
+            pass
+        self._conn = self._open(self._auth)
+
+    def is_connection_error(self, exc: BaseException) -> bool:
+        # Socket/transport-level failures mean the link is gone; impacket's
+        # SessionError (SMB status codes like NO_SUCH_FILE / ACCESS_DENIED) is an
+        # operational error and must propagate instead of triggering a reconnect.
+        if isinstance(exc, (ConnectionError, EOFError, TimeoutError, BrokenPipeError, OSError)):
+            return True
+        return type(exc).__name__ in ("NetBIOSError", "NetBIOSTimeout")
 
     @staticmethod
     def _split(path: str) -> tuple[str, str]:

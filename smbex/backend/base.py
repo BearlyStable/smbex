@@ -58,6 +58,19 @@ class Backend(Protocol):
         across chunks instead of reopening per chunk (fewer PDUs / audit events)."""
         ...
 
+    def reconnect(self) -> None:
+        """Re-establish the connection from stored credentials. Raises on failure.
+
+        The gateway calls this when a job fails with a connection-class error, then
+        retries the job once on the fresh connection. Open file handles from the old
+        connection do not survive."""
+        ...
+
+    def is_connection_error(self, exc: BaseException) -> bool:
+        """True if ``exc`` means the link is lost (so ``reconnect`` may help), vs a
+        normal operational error like "not found" (which should just propagate)."""
+        ...
+
     def close(self) -> None:
         """Tear down the connection."""
         ...

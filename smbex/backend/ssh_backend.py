@@ -34,13 +34,14 @@ class _SftpFile:
 
 
 class SshBackend:
-    def __init__(self, sftp, client=None, start_rel: str = ""):
+    def __init__(self, sftp, client=None, start_rel: str = "", auth: SshAuth | None = None):
         self._sftp = sftp
         self._client = client
         self.start_rel = start_rel
+        self._auth = auth  # retained so the gateway can reconnect after a drop
 
-    @classmethod
-    def connect(cls, auth: SshAuth) -> "SshBackend":
+    @staticmethod
+    def _open(auth: SshAuth):
         import getpass
 
         import paramiko
@@ -74,7 +75,38 @@ class SshBackend:
         client.connect(**kwargs)
         sftp = client.open_sftp()
         start = sftp.normalize(auth.start_path or ".")
-        return cls(sftp, client, start_rel=start.lstrip("/"))
+        return sftp, client, start.lstrip("/")
+
+    @classmethod
+    def connect(cls, auth: SshAuth) -> "SshBackend":
+        sftp, client, start_rel = cls._open(auth)
+        return cls(sftp, client, start_rel=start_rel, auth=auth)
+
+    def reconnect(self) -> None:
+        if self._auth is None:
+            raise RuntimeError("no stored credentials to reconnect")
+        for obj in (self._sftp, self._client):  # drop the dead channel/transport
+            try:
+                if obj is not None:
+                    obj.close()
+            except Exception:
+                pass
+        self._sftp, self._client, _ = self._open(self._auth)  # keep resolved start_rel
+
+    def is_connection_error(self, exc: BaseException) -> bool:
+        # Transport/socket failures mean the link is gone. A plain OSError from SFTP
+        # is "no such file"/"permission denied" (operational) — paramiko raises those
+        # as IOError with an errno, distinct from a dead channel, so exclude them.
+        if isinstance(exc, (ConnectionError, EOFError, TimeoutError, BrokenPipeError)):
+            return True
+        try:
+            import paramiko
+
+            if isinstance(exc, paramiko.SSHException):
+                return True
+        except Exception:
+            pass
+        return False
 
     @staticmethod
     def _server_path(path: str) -> str:

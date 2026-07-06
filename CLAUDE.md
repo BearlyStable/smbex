@@ -36,7 +36,7 @@ a slow connection. Target features (full list — most are still ahead):
 | 5 | Prioritization & throttling (browse preempts downloads) | **done** (core; see note) |
 | 6 | Preloader (surrounding folders, toggle) | **done** |
 | 7 | Offline translation (CTranslate2 + SentencePiece) + toggle | **done** |
-| 8 | Polish (help, reconnect, config, theming) | handed off |
+| 8 | Polish (help, reconnect, config, theming) | **in progress** (reconnect done) |
 
 > Phase 5 note: the throttle (browse preempts an in-flight download between chunks)
 > is implemented and tested (`test_browse_preempts_between_download_chunks`). What
@@ -67,6 +67,23 @@ a slow connection. Target features (full list — most are still ahead):
 > install/discovery unit test; real ja→en round-trips are `@pytest.mark.integration`,
 > skipped when the model/engine is absent. Not done: language auto-detection (source
 > is user-specified); smarter `snake_case`/compound handling (stem is one token).
+
+> Phase 8 note (reconnect/recovery — done): the gateway recovers a dropped link.
+> `Gateway._execute` runs each job and, if it raises a **connection-class** error
+> (per the backend's `is_connection_error`), calls `reconnect()` (up to
+> `reconnect_attempts`, `reconnect_delay` between) and retries the job **once** on the
+> fresh connection; it emits `on_status` = reconnecting/connected/disconnected, which
+> the app shows as a coloured status banner (`_on_conn_status`). Backends retain their
+> auth (`SmbAuth`/`SshAuth`) and rebuild in `reconnect()`. Classifiers target socket/
+> transport errors (OSError/EOFError/Timeout/NetBIOSError for SMB; those + paramiko
+> `SSHException` for SSH) — operational errors like "not found" (impacket `SessionError`)
+> propagate untouched. **Verified against a live SMB server** (socket-drop → OSError →
+> reconnect → retry recovers); a torn-down impacket connection can instead raise
+> `AttributeError` (only after an explicit `close()`, not a real drop) — not caught by
+> design. Browsing recovers transparently; a download's in-flight handle can't survive
+> a reconnect, so that transfer errors and resumes when re-grabbed. Tested in
+> `tests/test_reconnect.py` (FakeBackend `drop_next`/`reconnect_fails`). Remaining
+> Phase 8: help screen, config file, theming.
 
 > Timestamps note: entries show a compact age (`columns.py` `human_time`: '5m'/'3h'/
 > '2d'/'3w'/'6mo'/'2y', blank for unknown mtime=0) in every column; the file preview
@@ -217,7 +234,7 @@ smbex/
     impacket_backend.py  ✓ SMB via impacket SMBConnection
     fake_backend.py      ✓ in-memory tree for tests
     ssh_backend.py       ✓ SSH/SFTP via paramiko (TOFU host keys; unified path rooted at /)
-  gateway.py             ✓ async priority-queue gateway (browse preempts download)
+  gateway.py             ✓ async priority-queue gateway (browse preempts download; reconnect/retry)
   cache.py               ✓ in-memory, session-only listing cache
   browser.py             ✓ ranger navigation controller (cache-backed, cursor memory)
   download.py            ✓ background DownloadManager (resume/skip, mirror, throttled; one handle/file)
