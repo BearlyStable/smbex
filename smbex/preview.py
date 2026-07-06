@@ -12,17 +12,25 @@ from pathlib import Path
 MAX_TEXT_BYTES = 64 * 1024  # decode at most this much for a text preview
 MAX_HEX_BYTES = 2 * 1024  # hex-dump at most this much (128 lines)
 
-# Printable ASCII plus the usual whitespace/escape control chars.
-_TEXT_BYTES = bytes(range(0x20, 0x7F)) + b"\n\r\t\f\b\x1b"
+_OK_CONTROL = "\n\r\t\f\v"  # control chars that are normal in text
 
 
 def looks_binary(sample: bytes) -> bool:
+    """Heuristic: a NUL byte, or a high ratio of undecodable/control bytes, is binary.
+
+    UTF-8 text — including Japanese/CJK, Cyrillic, Arabic and other non-Latin scripts
+    whose bytes are all >= 0x80 — must count as text, so we decode as UTF-8 (a partial
+    multibyte char at the sampled tail is tolerated) rather than whitelisting ASCII.
+    """
     if not sample:
         return False
     if b"\x00" in sample:
         return True
-    nontext = sample.translate(None, _TEXT_BYTES)
-    return len(nontext) / len(sample) > 0.30
+    text = sample.decode("utf-8", errors="replace")
+    suspicious = text.count("�") + sum(  # invalid byte seqs + odd control chars
+        1 for ch in text if ord(ch) < 0x20 and ch not in _OK_CONTROL
+    )
+    return suspicious / len(text) > 0.30
 
 
 def hexdump(data: bytes, width: int = 16) -> str:

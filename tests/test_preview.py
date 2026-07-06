@@ -13,6 +13,16 @@ def test_looks_binary_heuristic():
     assert looks_binary(b"hello\nworld\n") is False
     assert looks_binary(b"") is False
     assert looks_binary(bytes(range(256))) is True  # mostly non-text
+    # UTF-8 non-Latin text is text, not binary (regression: was flagged binary):
+    assert looks_binary("会議メモ\n議事録: 予算\n".encode("utf-8")) is False
+    assert looks_binary("Пример текста\n".encode("utf-8")) is False
+
+
+def test_read_preview_japanese_is_text(tmp_path):
+    p = tmp_path / "memo.txt"
+    p.write_text("会議メモ\n地図/家族.jpg\n", encoding="utf-8")
+    kind, body, _ = read_preview(p)
+    assert kind == "text" and "会議メモ" in body
 
 
 def test_read_preview_text(tmp_path):
