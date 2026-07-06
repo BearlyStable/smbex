@@ -34,6 +34,16 @@ _THEME_ALIASES = {"dark": "textual-dark", "light": "textual-light"}
 _THEME_CYCLE = ["textual-dark", "textual-light", "nord", "gruvbox"]
 
 
+class _FileViewState:
+    """A downloaded text file open in the content viewer (windowed + lazy translate)."""
+
+    def __init__(self, name: str, lazy):
+        self.name = name
+        self.lazy = lazy  # viewer.LazyLines
+        self.top = 0  # index of the first visible line
+        self.translations: dict[int, str] = {}  # line index -> translated text
+
+
 class SmbexApp(App):
     TITLE = "smbex"
 
@@ -70,6 +80,9 @@ class SmbexApp(App):
         Binding("h,left", "leave", "Up"),
         Binding("g", "cursor_top", "Top"),
         Binding("G", "cursor_bottom", "Bottom"),
+        Binding("pagedown", "page_down", "Page dn", show=False),
+        Binding("pageup", "page_up", "Page up", show=False),
+        Binding("escape", "escape_view", "Back", show=False),
         Binding("d", "download", "Download"),
         Binding("a", "download_all", "Grab all"),
         Binding("w", "toggle_downloads", "Tasks"),
@@ -112,6 +125,7 @@ class SmbexApp(App):
         self.translate_enabled = translator is not None
         self._conn_state = "connected"  # updated by the gateway on link changes
         self._preview_key = None  # what the preview last rendered (to re-render on change)
+        self._view: _FileViewState | None = None  # set while a file's content is open
 
     @property
     def downloads(self) -> DownloadManager:
@@ -147,24 +161,63 @@ class SmbexApp(App):
         await self.browser.preloader.stop()  # cancel prefetches before the gateway
         await self._gateway.stop()
 
+    def on_resize(self, event) -> None:
+        if self._view is not None:  # re-fit the content window to the new height
+            self._render_view()
+
     # --- navigation actions ---------------------------------------------------
     async def action_cursor_down(self) -> None:
+        if self._view is not None:
+            self._scroll_view(1)
+            return
         self.browser.move(1)
         await self._refresh()
 
     async def action_cursor_up(self) -> None:
+        if self._view is not None:
+            self._scroll_view(-1)
+            return
         self.browser.move(-1)
         await self._refresh()
 
     async def action_cursor_top(self) -> None:
+        if self._view is not None:
+            self._view.top = 0
+            self._render_view()
+            return
         self.browser.move_to(0)
         await self._refresh()
 
     async def action_cursor_bottom(self) -> None:
+        if self._view is not None:
+            self._view.lazy.load_all()  # explicit jump-to-end reads the rest
+            self._view.top = max(0, self._view.lazy.loaded - self._view_rows())
+            self._render_view()
+            return
         self.browser.move_to(self.browser.count - 1)
         await self._refresh()
 
+    async def action_page_down(self) -> None:
+        if self._view is not None:
+            self._scroll_view(self._view_page())
+        else:
+            self.browser.move(max(1, self._view_rows() - 1))
+            await self._refresh()
+
+    async def action_page_up(self) -> None:
+        if self._view is not None:
+            self._scroll_view(-self._view_page())
+        else:
+            self.browser.move(-max(1, self._view_rows() - 1))
+            await self._refresh()
+
     async def action_enter(self) -> None:
+        if self._view is not None:
+            return
+        sel = self.browser.selected
+        if sel is not None and not sel.is_dir:  # a file -> open the content view
+            self._enter_file_view(sel)
+            return
         try:
             if await self.browser.enter():
                 await self._refresh()
@@ -172,11 +225,20 @@ class SmbexApp(App):
             self._status_error(exc)
 
     async def action_leave(self) -> None:
+        if self._view is not None:  # leave the content view, back to browsing
+            self._close_file_view()
+            await self._refresh()
+            return
         try:
             if await self.browser.go_parent():
                 await self._refresh()
         except Exception as exc:
             self._status_error(exc)
+
+    async def action_escape_view(self) -> None:
+        if self._view is not None:  # Esc leaves the viewer; a no-op while browsing
+            self._close_file_view()
+            await self._refresh()
 
     def action_toggle_preload(self) -> None:
         self.browser.preload_enabled = not self.browser.preload_enabled
@@ -186,7 +248,10 @@ class SmbexApp(App):
 
     async def action_toggle_translate(self) -> None:
         self.translate_enabled = not self.translate_enabled
-        await self._refresh()  # re-render with/without the English column
+        if self._view is not None:
+            self._render_view()  # switch the viewer between two-page and orig|translation
+        else:
+            await self._refresh()  # re-render with/without the English column
 
     async def action_cycle_sort(self) -> None:
         self.browser.cycle_sort()  # re-sorts the current view, keeping the selection
@@ -432,6 +497,108 @@ class SmbexApp(App):
             translated=self._name_translation(entry), translated_body=translated,
         )
 
+    # --- file content viewer (windowed, lazy translate) -----------------------
+    def _enter_file_view(self, entry) -> None:
+        """Open a downloaded text file's content in the columns. No-op (with a hint)
+        for a file that isn't downloaded or isn't text — downloads stay explicit."""
+        local = self._downloaded_local_path(entry)
+        if local is None:
+            self._status_note(f"'{entry.name}' isn't downloaded yet — press 'd' first")
+            return
+        try:
+            from smbex.preview import looks_binary
+
+            with open(local, "rb") as f:
+                if looks_binary(f.read(4096)):
+                    self._status_note(f"'{entry.name}' is binary — no text view")
+                    return
+        except Exception as exc:
+            self._status_error(exc)
+            return
+        from smbex.viewer import LazyLines
+
+        self._view = _FileViewState(entry.name, LazyLines(local))
+        self.query_one("#parent", Column).add_class("hidden")  # focus on the file
+        self.query_one("#preview", Column).remove_class("hidden")
+        self._render_view()
+
+    def _close_file_view(self) -> None:
+        if self._view is None:
+            return
+        self._view.lazy.close()
+        self._view = None
+        # restore the columns to the user's toggle state
+        self.query_one("#parent", Column).set_class(not self._show_parent, "hidden")
+        self.query_one("#preview", Column).set_class(not self._show_preview, "hidden")
+
+    def _view_rows(self) -> int:
+        # The columns auto-size to content, so take the available height from their
+        # container (minus the column's round border top+bottom).
+        h = self.query_one("#columns").size.height
+        return (h - 2) if h and h > 2 else 30
+
+    def _view_page(self) -> int:
+        """Lines to advance for a page: one screenful — two panes when not translating."""
+        rows = self._view_rows()
+        translating = self._view_translating()
+        return rows if translating else rows * 2
+
+    def _view_translating(self) -> bool:
+        return bool(self.translate_enabled and self._translator and self._translator.available)
+
+    def _scroll_view(self, delta: int) -> None:
+        v = self._view
+        if v is None:
+            return
+        v.top = max(0, v.top + delta)
+        self._render_view()
+
+    def _render_view(self) -> None:
+        v = self._view
+        if v is None:
+            return
+        rows = self._view_rows()
+        if v.lazy.eof:  # don't scroll past the end once the length is known
+            v.top = max(0, min(v.top, v.lazy.loaded - 1))
+        lines = v.lazy.window(v.top, rows)
+        self.query_one("#current", Column).show_lines(lines, start=v.top)
+        right = self.query_one("#preview", Column)
+        if self._view_translating():  # middle = original, right = translation (aligned)
+            translated = [v.translations.get(v.top + i) for i in range(len(lines))]
+            right.show_lines([""] * len(lines), start=v.top, translated=translated)
+            self._translate_view_window(v, v.top, lines)
+        else:  # two-page view: middle = this screen, right = the next screen
+            page_b = v.lazy.window(v.top + rows, rows)
+            right.show_lines(page_b, start=v.top + rows)
+        self._update_status()
+
+    def _translate_view_window(self, v, top: int, lines: list) -> None:
+        missing = [(top + i, ln) for i, ln in enumerate(lines) if (top + i) not in v.translations]
+        if not missing:
+            return
+        self.run_worker(self._do_translate_view(v, missing), group="view-xlate", exclusive=True)
+
+    async def _do_translate_view(self, v, missing) -> None:
+        import asyncio
+
+        translator = self._translator
+
+        def work():
+            return [(i, translator.translate(ln) if ln.strip() else "") for i, ln in missing]
+
+        try:
+            results = await asyncio.to_thread(work)
+        except Exception:
+            return
+        if self._view is not v:  # viewer closed or a different file since
+            return
+        for i, text in results:
+            v.translations[i] = text
+        self._render_view()  # cached now -> no new worker spawned
+
+    def _status_note(self, message: str) -> None:
+        self.query_one("#status", Static).update(Text(f" {message}", style="yellow"))
+
     def _refresh_downloads(self) -> None:
         self.query_one("#downloads", DownloadPanel).render_items(self._downloads.items)
         self._update_status()
@@ -439,6 +606,8 @@ class SmbexApp(App):
     def _on_downloads_change(self) -> None:
         try:
             self._refresh_downloads()
+            if self._view is not None:
+                return  # the content viewer owns the columns; don't repaint the browser
             self._render_current()  # keep the status gutter in sync with progress
             # If the file under the (unmoved) cursor just finished downloading, flip
             # its preview from metadata to content.
@@ -462,6 +631,15 @@ class SmbexApp(App):
             pass  # widgets may be gone during teardown
 
     def _update_status(self) -> None:
+        if self._view is not None:  # content-viewer status
+            v = self._view
+            total = f"{v.lazy.loaded}{'' if v.lazy.eof else '+'}"
+            mode = "orig|translation" if self._view_translating() else "2-page"
+            self.query_one("#status", Static).update(
+                f" VIEW {v.name} │ line {v.top + 1}/{total} │ {mode} │ "
+                f"j/k scroll · t translate · h/Esc back"
+            )
+            return
         browser = self.browser
         total = browser.cache.hits + browser.cache.misses
         preload = "on" if browser.preload_enabled else "off"

@@ -15,11 +15,18 @@ from textual.widgets import Static
 _SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Navigate", [
         ("h Left", "up to the parent folder"),
-        ("l Right Enter", "open the selected folder"),
-        ("j Down", "move down"),
-        ("k Up", "move up"),
+        ("l Right Enter", "open folder, or view a downloaded file"),
+        ("j Down", "move down / scroll"),
+        ("k Up", "move up / scroll"),
         ("g / G", "jump to top / bottom"),
+        ("PgUp/PgDn", "page up / down"),
         ("o", "cycle sort: name / newest / oldest"),
+    ]),
+    ("View a file", [
+        ("l / Enter", "open a downloaded text file"),
+        ("j/k g/G", "scroll (loads more lazily)"),
+        ("t", "original + English side by side"),
+        ("h / Esc", "back to the listing"),
     ]),
     ("Transfer", [
         ("d", "download selection (recursive for folders)"),

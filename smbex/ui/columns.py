@@ -148,6 +148,26 @@ class Column(Static):
         self.rendered_text = text.plain
         self.update(text)
 
+    def show_lines(
+        self, lines: list[str], start: int = 0, translated: list | None = None
+    ) -> None:
+        """Render a window of file content with a line-number gutter (starting at
+        ``start``). If ``translated`` (parallel to ``lines``) is given, show each
+        translated line instead — a ``None`` entry means "not translated yet"."""
+        text = Text(no_wrap=True, overflow="ellipsis")
+        gutter = len(str(start + len(lines))) if lines else 1
+        for i, line in enumerate(lines):
+            text.append(f"{start + i + 1:>{gutter}} ", style="dim")
+            if translated is not None:
+                rendered = translated[i] if i < len(translated) else None
+                text.append("" if rendered is None else rendered, style="green")
+            else:
+                text.append(line)
+            text.append("\n")
+        self.shown = []
+        self.rendered_text = text.plain
+        self.update(text)
+
     def show_file(self, entry: DirEntry | None, translated: str | None = None) -> None:
         self.shown = []
         if entry is None:
