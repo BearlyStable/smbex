@@ -76,6 +76,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="initial listing sort (cycle in-app with 'o'; default: name)",
     )
     ui.add_argument(
+        "--theme",
+        metavar="NAME",
+        default="dark",
+        help="colour theme: dark, light, nord, gruvbox, … (switch in-app with 'T'; default: dark)",
+    )
+    ui.add_argument(
         "--config",
         metavar="FILE",
         help="config file to read (default: ~/.config/smbex/config.ini)",
@@ -200,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
             download_root=Path(args.download_dir) / _safe(spec.ssh.host),
             translator=translator,
             sort=args.sort,
+            theme=args.theme,
         ).run()
         return 0
 
@@ -224,5 +231,6 @@ def main(argv: list[str] | None = None) -> int:
         download_root=Path(args.download_dir) / _safe(smb.host),
         translator=translator,
         sort=args.sort,
+        theme=args.theme,
     ).run()
     return 0

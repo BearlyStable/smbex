@@ -36,7 +36,7 @@ a slow connection. Target features (full list — most are still ahead):
 | 5 | Prioritization & throttling (browse preempts downloads) | **done** (core; see note) |
 | 6 | Preloader (surrounding folders, toggle) | **done** |
 | 7 | Offline translation (CTranslate2 + SentencePiece) + toggle | **done** |
-| 8 | Polish (help, reconnect, config, theming) | **in progress** (reconnect + help + config done) |
+| 8 | Polish (help, reconnect, config, theming) | **done** |
 
 > Phase 5 note: the throttle (browse preempts an in-flight download between chunks)
 > is implemented and tested (`test_browse_preempts_between_download_chunks`). What
@@ -107,9 +107,16 @@ a slow connection. Target features (full list — most are still ahead):
 > `translate`, `sort` (name/newest/oldest), `download_dir`; `--preload`/`--auto-reconnect`
 > are `BooleanOptionalAction` so config-on can be overridden with `--no-…`. `--sort`
 > seeds `SmbexApp(sort=…)` → `browser.sort_mode` via `SORT_BY_LABEL`. `--write-config`
-> drops a commented sample. Tested in `tests/test_config.py`. Reconnect over SSH/SFTP
-> is verified too (`tests/test_backend_ssh_integration.py::test_ssh_reconnect_after_drop`).
-> Remaining Phase 8: theming.
+> drops a commented sample. `theme` is also persisted (see Theming note). Tested in
+> `tests/test_config.py`. Reconnect over SSH/SFTP is verified too
+> (`tests/test_backend_ssh_integration.py::test_ssh_reconnect_after_drop`).
+
+> Theming note: `--theme NAME` / config `theme` set the startup theme (dark default);
+> `T` cycles `_THEME_CYCLE` (textual-dark/-light/nord/gruvbox, filtered to those
+> `available_themes` has). `_THEME_ALIASES` maps dark→textual-dark, light→textual-light;
+> any other name passes through to Textual, else falls back to textual-dark
+> (`SmbexApp._resolve_theme`). Tested in `tests/test_ui_theme.py`. **Phase 8 complete —
+> all planned phases (0–8) are done.**
 
 > Timestamps note: entries show a compact age (`columns.py` `human_time`: '5m'/'3h'/
 > '2d'/'3w'/'6mo'/'2y', blank for unknown mtime=0) in every column; the file preview
@@ -164,7 +171,8 @@ Actual keybindings today: `h/j/k/l`+arrows, `g`/`G`, `l`/`Enter` open, `h` up,
 panel, `o` cycle sort (name→newest→oldest), `p` preload toggle (prefetches
 surrounding folders), `r` reconnect (after a dropped link; auto only with
 `--auto-reconnect`), `t` translate toggle (English beside originals; needs
-`--translate <lang>`), `?` help overlay, `q` quit.
+`--translate <lang>`), `T` cycle colour theme (dark/light/nord/gruvbox), `?` help
+overlay, `q` quit.
 
 ## Install & environment
 

@@ -19,7 +19,7 @@ from pathlib import Path
 
 # Keys mirrored to argparse dests; the rest are treated as strings.
 _BOOL_KEYS = ("preload", "auto_reconnect")
-_STR_KEYS = ("translate", "sort", "download_dir")
+_STR_KEYS = ("translate", "sort", "theme", "download_dir")
 
 _SAMPLE = """\
 # smbex configuration.  Location: ~/.config/smbex/config.ini
@@ -39,6 +39,9 @@ translate =
 
 # Initial sort order:  name | newest | oldest
 sort = name
+
+# Colour theme: dark | light | nord | gruvbox (or any Textual theme name).
+theme = dark
 
 # Local root for downloads (the remote tree is mirrored under DIR/<host>).
 download_dir = downloads

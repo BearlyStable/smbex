@@ -28,6 +28,12 @@ from smbex.ui.downloads import DownloadPanel
 from smbex.ui.help import HelpScreen
 
 
+# Friendly names for --theme / config; anything else is passed through to Textual.
+_THEME_ALIASES = {"dark": "textual-dark", "light": "textual-light"}
+# What the 'T' key cycles through (filtered to those Textual actually has).
+_THEME_CYCLE = ["textual-dark", "textual-light", "nord", "gruvbox"]
+
+
 class SmbexApp(App):
     TITLE = "smbex"
 
@@ -71,6 +77,7 @@ class SmbexApp(App):
         Binding("t", "toggle_translate", "Translate"),
         Binding("o", "cycle_sort", "Sort"),
         Binding("r", "reconnect", "Reconnect"),
+        Binding("T", "cycle_theme", "Theme"),
         Binding("question_mark", "help", "Help"),
     ]
 
@@ -84,9 +91,11 @@ class SmbexApp(App):
         download_root: Path | str = "downloads",
         translator: Translator | None = None,
         sort: str = "name",
+        theme: str = "dark",
     ):
         super().__init__()
         self._gateway = gateway
+        self._theme_pref = theme
         self.browser = Browser(gateway, preload=preload)
         self.browser.sort_mode = SORT_BY_LABEL.get(sort, "name")  # initial view sort
         self._downloads = DownloadManager(gateway, Path(download_root))
@@ -112,7 +121,7 @@ class SmbexApp(App):
         yield Footer()
 
     async def on_mount(self) -> None:
-        self.theme = "textual-dark"  # dark by default
+        self.theme = self._resolve_theme(self._theme_pref)  # dark by default
         self._gateway.on_status = self._on_conn_status  # surface reconnect state
         await self._gateway.start()
         self._downloads.on_change = self._on_downloads_change
@@ -176,6 +185,21 @@ class SmbexApp(App):
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen())
+
+    def _resolve_theme(self, name: str) -> str:
+        """Map a friendly/config theme name to a registered Textual theme."""
+        resolved = _THEME_ALIASES.get(name, name)
+        return resolved if resolved in self.available_themes else "textual-dark"
+
+    def action_cycle_theme(self) -> None:
+        cycle = [t for t in _THEME_CYCLE if t in self.available_themes]
+        if not cycle:
+            return
+        try:
+            i = cycle.index(self.theme)
+        except ValueError:
+            i = -1
+        self.theme = cycle[(i + 1) % len(cycle)]
 
     async def action_reconnect(self) -> None:
         """Operator-driven reconnect (the 'r' key). The only way the link comes back

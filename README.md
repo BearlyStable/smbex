@@ -77,6 +77,7 @@ Optional extras: `--preload` prefetches surrounding folders (toggle with `p`);
 (toggle with `t`), computed on-box — see *Install* for the one-time model setup.
 Press `?` for the key reference. If a link drops it's reported and you press `r`
 to reconnect (a deliberate new login); `--auto-reconnect` heals silently instead.
+`--theme <name>` (dark/light/nord/gruvbox) sets the colour theme; `T` switches it.
 
 Defaults live in a config file (`~/.config/smbex/config.ini`; flags override it):
 

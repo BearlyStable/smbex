@@ -29,6 +29,7 @@ _SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("View", [
         ("p", "preload surrounding folders (on / off)"),
         ("t", "translate filenames to English (on / off)"),
+        ("T", "switch colour theme (dark / light / …)"),
     ]),
     ("Connection", [
         ("r", "reconnect after a dropped link"),
