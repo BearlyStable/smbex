@@ -5,6 +5,7 @@ recursive size can't be known without walking it — see CLAUDE.md)."""
 
 from __future__ import annotations
 
+from rich.table import Table
 from rich.text import Text
 from textual.widgets import Static
 
@@ -76,38 +77,51 @@ class Column(Static):
         translations: list[str] | None = None,
         markers: list[str] | None = None,
     ) -> None:
-        """Render the listing. ``translations`` (parallel to ``entries``) shows each
-        English rendering beside the original name; ``markers`` prefixes each row with
-        a one-char status glyph (cached / queued / downloaded)."""
+        """Render the listing as an aligned table. ``translations`` (parallel to
+        ``entries``) shows each English rendering beside the original name;
+        ``markers`` adds a leading one-char status glyph (cached / queued / downloaded).
+
+        A ``rich`` grid keeps the name, size and age in fixed, right-aligned columns
+        regardless of translation length or column width — the name (with its optional
+        translation) flexes and truncates with an ellipsis, so metadata never drifts.
+        """
         self.shown = entries
-        text = Text(no_wrap=True, overflow="ellipsis")
         if not entries:
-            text.append("(empty)", style="dim italic")
-        name_width = max((len(e.name) + (1 if e.is_dir else 0) for e in entries), default=0)
+            self.rendered_text = "(empty)"
+            self.update(Text("(empty)", style="dim italic"))
+            return
+
+        table = Table.grid(expand=True, padding=(0, 1))
+        if markers is not None:
+            table.add_column(width=1, no_wrap=True)  # status gutter
+        table.add_column(ratio=1, no_wrap=True, overflow="ellipsis")  # name (+ translation)
+        table.add_column(justify="right", no_wrap=True)  # size
+        table.add_column(justify="right", no_wrap=True)  # age
+
+        lines: list[str] = []
         for i, entry in enumerate(entries):
+            glyph = " "
+            cells = []
             if markers is not None:
                 glyph = markers[i] if i < len(markers) else " "
-                text.append(glyph + " ", style=MARKER_STYLE.get(glyph, ""))
-            label = (entry.name + ("/" if entry.is_dir else "")).ljust(name_width)
-            if cursor == i:
-                style = "reverse" if active else "bold"
-            elif entry.is_dir:
-                style = "cyan"
-            else:
-                style = ""
-            text.append(label, style=style)
+                cells.append(Text(glyph, style=MARKER_STYLE.get(glyph, "")))
+
+            name = Text(entry.name + ("/" if entry.is_dir else ""), style="cyan" if entry.is_dir else "")
             if translations is not None and i < len(translations):
                 rendered = translations[i]
                 if rendered and rendered != entry.name:
-                    text.append("  → ", style="dim")
-                    text.append(rendered, style="italic green")
-            # Right-side metadata: size (files only) then a compact mtime (all
-            # entries). Blank size keeps the time column aligned across dirs/files.
-            text.append("  " + (human_size(entry.size).rjust(7) if not entry.is_dir else " " * 7), style="dim")
-            text.append("  " + human_time(entry.mtime).rjust(4), style="dim")
-            text.append("\n")
-        self.rendered_text = text.plain
-        self.update(text)
+                    name.append("  → ", style="dim")
+                    name.append(rendered, style="green")
+            size = human_size(entry.size) if not entry.is_dir else ""
+            age = human_time(entry.mtime)
+            cells += [name, Text(size, style="dim"), Text(age, style="dim")]
+
+            row_style = ("reverse" if active else "bold") if cursor == i else ""
+            table.add_row(*cells, style=row_style)
+            lines.append(f"{glyph} {name.plain}  {size}  {age}")
+
+        self.rendered_text = "\n".join(lines)
+        self.update(table)
 
     def show_file(self, entry: DirEntry | None, translated: str | None = None) -> None:
         self.shown = []
