@@ -6,6 +6,7 @@ import pytest
 
 from smbex.auth import (
     Proto,
+    build_ftp_auth,
     build_smb_auth,
     build_ssh_auth,
     make_conn_spec,
@@ -101,8 +102,30 @@ def test_ssh_identity_file():
     assert s.key_filename == "/home/me/.ssh/id_ed25519"
 
 
+def test_ftp_full_url():
+    f = build_ftp_auth("ftp://user:pass@host:2121/pub")
+    assert (f.host, f.username, f.password, f.port, f.start_path) == (
+        "host", "user", "pass", 2121, "/pub"
+    )
+    assert f.use_tls is False
+
+
+def test_ftp_defaults_anonymous():
+    f = build_ftp_auth("ftp://host")
+    assert f.port == 21 and f.username == "" and f.start_path == "."  # "" -> anonymous
+
+
+def test_ftps_scheme_sets_tls():
+    f = build_ftp_auth("ftps://user@host")
+    assert f.use_tls is True and f.port == 21
+
+
 def test_make_conn_spec_dispatch():
     smb = make_conn_spec("DOMAIN/user:pass@host")
     assert smb.proto is Proto.SMB and smb.smb is not None and smb.smb.username == "user"
     ssh = make_conn_spec("ssh://user@host")
     assert ssh.proto is Proto.SSH and ssh.ssh is not None and ssh.ssh.host == "host"
+    ftp = make_conn_spec("ftp://user@host")
+    assert ftp.proto is Proto.FTP and ftp.ftp is not None and ftp.ftp.host == "host"
+    ftps = make_conn_spec("ftps://host:990")
+    assert ftps.proto is Proto.FTP and ftps.ftp.use_tls is True and ftps.ftp.port == 990

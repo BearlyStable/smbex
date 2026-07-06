@@ -221,3 +221,43 @@ def sftp_server(tmp_path_factory):
     threading.Thread(target=serve, daemon=True).start()
     yield {"host": "127.0.0.1", "port": port, "root": root}
     listen.close()
+
+
+@pytest.fixture(scope="session")
+def ftp_server(tmp_path_factory):
+    """An in-process pyftpdlib FTP server on an ephemeral localhost port.
+
+    User ``tester``/``secret`` over a temp tree (incl. a >64 KB file to exercise
+    chunked/partial reads). Skips cleanly if pyftpdlib is unavailable."""
+    try:
+        import threading
+
+        from pyftpdlib.authorizers import DummyAuthorizer
+        from pyftpdlib.handlers import FTPHandler
+        from pyftpdlib.servers import FTPServer
+    except Exception as exc:  # pragma: no cover
+        pytest.skip(f"pyftpdlib unavailable: {exc}")
+
+    root = tmp_path_factory.mktemp("ftproot")
+    (root / "readme.txt").write_bytes(b"hello ftp")
+    (root / "big.bin").write_bytes(b"x" * 200_000)  # multi-recv / partial-read cases
+    logs = root / "logs"
+    logs.mkdir()
+    (logs / "app.log").write_bytes(b"line1\nline2\n")
+
+    authorizer = DummyAuthorizer()
+    authorizer.add_user("tester", "secret", str(root), perm="elr")  # list + retrieve
+
+    class _Handler(FTPHandler):
+        authorizer = None  # set below
+
+    _Handler.authorizer = authorizer
+    _Handler.log_prefix = ""  # keep test output quiet
+
+    logging.getLogger("pyftpdlib").setLevel(logging.CRITICAL)
+    server = FTPServer(("127.0.0.1", 0), _Handler)
+    host, port = server.address
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield {"host": host, "port": port, "root": root}
+    server.close_all()

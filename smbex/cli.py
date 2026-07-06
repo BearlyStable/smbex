@@ -139,6 +139,20 @@ def _connect_ssh(ssh):
         raise SystemExit(f"connection failed: {exc}")
 
 
+def _connect_ftp(ftp):
+    """Connect over FTP/FTPS, prompting for a password if a named user has none."""
+    from smbex.backend.ftp_backend import FtpBackend
+
+    if ftp.username and ftp.username != "anonymous" and not ftp.password:
+        import getpass
+
+        ftp.password = getpass.getpass(f"Password for {ftp.username}@{ftp.host}: ")
+    try:
+        return FtpBackend.connect(ftp)
+    except Exception as exc:  # noqa: BLE001 - report any connection failure cleanly
+        raise SystemExit(f"connection failed: {exc}")
+
+
 def main(argv: list[str] | None = None) -> int:
     from smbex.config import load_config, write_sample_config
 
@@ -196,14 +210,17 @@ def main(argv: list[str] | None = None) -> int:
     from smbex.gateway import Gateway
     from smbex.ui.app import SmbexApp
 
-    if spec.proto is Proto.SSH:
-        backend = _connect_ssh(spec.ssh)
+    if spec.proto in (Proto.SSH, Proto.FTP):
+        if spec.proto is Proto.SSH:
+            backend, host = _connect_ssh(spec.ssh), spec.ssh.host
+        else:
+            backend, host = _connect_ftp(spec.ftp), spec.ftp.host
         SmbexApp(
             Gateway(backend, auto_reconnect=args.auto_reconnect),
             start_path=getattr(backend, "start_rel", ""),
             preload=args.preload,
             label=args.target,
-            download_root=Path(args.download_dir) / _safe(spec.ssh.host),
+            download_root=Path(args.download_dir) / _safe(host),
             translator=translator,
             sort=args.sort,
             theme=args.theme,

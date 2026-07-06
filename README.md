@@ -1,8 +1,9 @@
 # smbex
 
-A terminal (TUI) explorer for remote hosts over **SMB** and **SSH/SFTP**, built for
-slow links: ranger-style navigation, in-session listing cache, background downloads
-that yield to browsing, folder preloading, and offline filename translation.
+A terminal (TUI) explorer for remote hosts over **SMB**, **SSH/SFTP**, and
+**FTP/FTPS**, built for slow links: ranger-style navigation, in-session listing
+cache, background downloads that yield to browsing, folder preloading, and offline
+filename translation.
 
 > Status: **foundation** in progress. See [CLAUDE.md](CLAUDE.md) for the full
 > architecture, roadmap, and hand-off notes.
@@ -61,6 +62,10 @@ python3 -m smbex -k --dc-ip 10.0.0.1 'DOMAIN/user@host.domain'    # Kerberos (cc
 # SSH/SFTP (host keys auto-accepted by default; --strict-host-keys to verify):
 python3 -m smbex 'ssh://user@host'
 python3 -m smbex -i ~/.ssh/id_ed25519 'ssh://user@host:2222/var/log'
+
+# FTP / FTPS (no user -> anonymous; ftps:// for TLS):
+python3 -m smbex 'ftp://user@host'
+python3 -m smbex 'ftps://user:pass@host:21/pub'
 ```
 
 Navigate like ranger: `h/j/k/l` (or arrows), `g`/`G` for top/bottom, `q` to quit.

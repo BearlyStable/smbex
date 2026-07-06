@@ -5,13 +5,14 @@ Guidance for any Claude thread (or human) continuing this project. Read this fir
 ## What we're building
 
 `smbex`: a terminal file explorer for remote hosts, designed to stay responsive on
-a slow connection. Target features (full list — most are still ahead):
+a slow connection. Feature list (all implemented — phases 0–9 done):
 
-- **Two protocols**, one UI:
+- **Three protocols**, one UI:
   - **SMB** with the same login surface as `impacket-smbclient` (password, NTLM
     hash / pass-the-hash, Kerberos ccache, AES key, null session, `-dc-ip`,
     `-target-ip`, port 139/445).
   - **SSH/SCP** via SFTP (connect, browse, download). Auth: password, key file, agent.
+  - **FTP / FTPS** via stdlib `ftplib` (`ftp://` / `ftps://`; anonymous or user/pass).
 - **Ranger-style navigation** (Miller columns, `h/j/k/l`, `gg`/`G`, previews).
 - **In-session listing cache** so revisiting a folder is instant. **Session-only —
   never persisted to disk.**
@@ -37,6 +38,7 @@ a slow connection. Target features (full list — most are still ahead):
 | 6 | Preloader (surrounding folders, toggle) | **done** |
 | 7 | Offline translation (CTranslate2 + SentencePiece) + toggle | **done** |
 | 8 | Polish (help, reconnect, config, theming) | **done** |
+| 9 | FTP/FTPS backend (ftplib) + tests | **done** |
 
 > Phase 5 note: the throttle (browse preempts an in-flight download between chunks)
 > is implemented and tested (`test_browse_preempts_between_download_chunks`). What
@@ -110,6 +112,21 @@ a slow connection. Target features (full list — most are still ahead):
 > drops a commented sample. `theme` is also persisted (see Theming note). Tested in
 > `tests/test_config.py`. Reconnect over SSH/SFTP is verified too
 > (`tests/test_backend_ssh_integration.py::test_ssh_reconnect_after_drop`).
+
+> Phase 9 note (FTP/FTPS): `smbex/backend/ftp_backend.py` on stdlib `ftplib` (no new
+> runtime dep). `ftp://` / `ftps://` targets (`auth.build_ftp_auth`, `Proto.FTP`,
+> `cli._connect_ftp`; no user → anonymous). Unified path rooted at "/" like SSH;
+> listings prefer MLSD (type/size/modify → `DirEntry`) with a best-effort Unix-LIST
+> fallback. Two FTP gotchas handled: (1) force `TYPE I` before every RETR — FTP
+> defaults to ASCII (CRLF translation) and MLSD/LIST leave the session in TYPE A;
+> (2) reads that stop before EOF **drain the data connection** rather than `ABOR`
+> (aborting a RETR desyncs the control channel with a leftover 426/226). No persistent
+> file handle: `open_file` streams one RETR sequentially, reopening on a seek.
+> `reconnect`/`is_connection_error` mirror the others (FileNotFoundError from a 550 is
+> excluded so it isn't treated as a drop). Verified against a live in-process
+> pyftpdlib server, `tests/test_backend_ftp_integration.py` (list/read/stat, partial
+> read, recursive download, drop→manual-reconnect, TUI browse) — **@integration; skips
+> if pyftpdlib is absent** (test-only dep; `python3-pyftpdlib` on apt).
 
 > Theming note: `--theme NAME` / config `theme` set the startup theme (dark default);
 > `T` cycles `_THEME_CYCLE` (textual-dark/-light/nord/gruvbox, filtered to those
@@ -202,6 +219,7 @@ Approximate versions in Kali rolling (Debian sid), confirmed on packages.debian.
 | textual | `python3-textual` | 8.2.3 | 8.2.8 | needs the theme API (Textual ≳ 2.x; sid is fine, Debian *stable* trixie=2.1.2 ok, bookworm=0.1.13 **too old**) |
 | pytest | `python3-pytest` | — | 9.1.1 | dev/test |
 | pytest-asyncio | `python3-pytest-asyncio` | 1.4.0 | 1.4.0 | dev/test; `asyncio_mode=auto` set in pyproject |
+| pyftpdlib | `python3-pyftpdlib` | 2.0.x | 2.0.x | **dev/test only** — in-process FTP server for the FTP integration tests. FTP runtime itself is stdlib `ftplib` (no dep). |
 | ctranslate2 | **none** | — | 4.8.1 | **NOT in apt.** Translation inference engine; small wheel. |
 | sentencepiece | `python3-sentencepiece` | 0.2.x | 0.2.1 | Tokeniser. In apt, but pip-installing it with ctranslate2 is simplest. |
 
@@ -250,8 +268,9 @@ Two load-bearing seams keep this testable and responsive:
 1. **Backend abstraction** (`smbex/backend/base.py`) — a protocol with
    `roots() / list() / stat() / open_read() / open_file()` over a single POSIX path.
    Implementations: `impacket_backend.py` (SMB; first path component = share),
-   `ssh_backend.py` (paramiko/SFTP, Phase 3), and `fake_backend.py` (in-memory tree
-   for fast offline tests). Everything above the backend is protocol-agnostic.
+   `ssh_backend.py` (paramiko/SFTP), `ftp_backend.py` (stdlib ftplib; FTP/FTPS), and
+   `fake_backend.py` (in-memory tree for fast offline tests). Everything above the
+   backend is protocol-agnostic.
 2. **Serializing gateway** (`smbex/gateway.py`) — owns the connection and an asyncio
    **priority** queue. One worker pops the highest-priority job and runs the blocking
    backend call via `asyncio.to_thread` behind a lock (a single impacket/paramiko
@@ -269,6 +288,7 @@ smbex/
     impacket_backend.py  ✓ SMB via impacket SMBConnection
     fake_backend.py      ✓ in-memory tree for tests
     ssh_backend.py       ✓ SSH/SFTP via paramiko (TOFU host keys; unified path rooted at /)
+    ftp_backend.py       ✓ FTP/FTPS via stdlib ftplib (MLSD listings; REST+RETR reads)
   gateway.py             ✓ async priority-queue gateway (browse preempts download; reconnect/retry)
   cache.py               ✓ in-memory, session-only listing cache
   config.py              ✓ INI config (~/.config/smbex/config.ini); built-in<config<CLI

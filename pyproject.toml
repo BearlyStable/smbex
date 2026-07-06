@@ -18,6 +18,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pyftpdlib>=1.5",  # in-process FTP server for the FTP integration tests only
 ]
 # Offline-translation runtime: CTranslate2 (inference) + SentencePiece (tokeniser)
 # drive an Argos-format model directly (~65 MB) — deliberately NOT `argostranslate`,

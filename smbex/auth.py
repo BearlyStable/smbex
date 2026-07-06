@@ -7,11 +7,13 @@ SMB target syntax mirrors ``impacket-smbclient``::
 plus options: ``hashes`` (LM:NT), ``no_pass``, ``kerberos``, ``aes_key``,
 ``dc_ip``, ``target_ip``, ``port``.
 
-SSH target syntax is a URL::
+SSH and FTP target syntax is a URL::
 
     ssh://[user[:password]@]host[:port][/start_path]
+    ftp://[user[:password]@]host[:port][/start_path]     (ftps:// for FTP over TLS)
 
-plus ``identity`` (key file), ``use_agent``, ``known_hosts_policy``.
+SSH adds ``identity`` (key file), ``use_agent``, ``known_hosts_policy``. FTP with no
+user logs in anonymously.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from urllib.parse import unquote, urlsplit
 class Proto(str, Enum):
     SMB = "smb"
     SSH = "ssh"
+    FTP = "ftp"
 
 
 # impacket's target parser (impacket.utils.parse_target), inlined so we match
@@ -172,14 +175,43 @@ def build_ssh_auth(
 
 
 @dataclass
+class FtpAuth:
+    host: str
+    username: str = ""  # empty -> anonymous
+    password: str = ""
+    port: int = 21
+    use_tls: bool = False  # ftps:// -> FTP over TLS (FTP_TLS + PROT P)
+    start_path: str = "."
+
+
+def build_ftp_auth(target: str) -> FtpAuth:
+    if "://" not in target:
+        target = "ftp://" + target
+    parts = urlsplit(target)
+    if parts.scheme not in ("ftp", "ftps"):
+        raise ValueError(f"not an ftp target: {target!r}")
+    if not parts.hostname:
+        raise ValueError("ftp target requires a host")
+    return FtpAuth(
+        host=parts.hostname,
+        username=unquote(parts.username) if parts.username else "",
+        password=unquote(parts.password) if parts.password else "",
+        port=parts.port or 21,
+        use_tls=(parts.scheme == "ftps"),
+        start_path=parts.path or ".",
+    )
+
+
+@dataclass
 class ConnSpec:
     proto: Proto
     smb: SmbAuth | None = None
     ssh: SshAuth | None = None
+    ftp: FtpAuth | None = None
 
 
 def make_conn_spec(target: str, **options) -> ConnSpec:
-    """Dispatch on scheme: ``ssh://`` → SSH, anything else → impacket-style SMB."""
+    """Dispatch on scheme: ``ssh://`` → SSH, ``ftp(s)://`` → FTP, else impacket SMB."""
     if target.startswith("ssh://"):
         return ConnSpec(
             Proto.SSH,
@@ -190,6 +222,8 @@ def make_conn_spec(target: str, **options) -> ConnSpec:
                 known_hosts_policy=options.get("known_hosts_policy", "auto"),
             ),
         )
+    if target.startswith(("ftp://", "ftps://")):
+        return ConnSpec(Proto.FTP, ftp=build_ftp_auth(target))
     return ConnSpec(
         Proto.SMB,
         smb=build_smb_auth(
