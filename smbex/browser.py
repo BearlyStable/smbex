@@ -39,6 +39,7 @@ def _sort(entries: list[DirEntry]) -> list[DirEntry]:
 #: View sort modes cycled by the 'o' key; ``mtime`` is the only cross-protocol time.
 SORT_MODES = ("name", "mtime_desc", "mtime_asc")
 SORT_LABELS = {"name": "name", "mtime_desc": "newest", "mtime_asc": "oldest"}
+SORT_BY_LABEL = {label: mode for mode, label in SORT_LABELS.items()}  # CLI/config -> mode
 
 
 class Browser:

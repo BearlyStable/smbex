@@ -58,14 +58,32 @@ def build_parser() -> argparse.ArgumentParser:
     ui = parser.add_argument_group("UI")
     ui.add_argument(
         "--preload",
-        action="store_true",
-        help="prefetch surrounding folders while browsing (default: off; toggle in-app with 'p')",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="prefetch surrounding folders while browsing (toggle in-app with 'p')",
     )
     ui.add_argument(
         "--auto-reconnect",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help="silently reconnect after a dropped link (default: off — report the drop "
         "and wait for 'r', so a new login/session event is operator-driven)",
+    )
+    ui.add_argument(
+        "--sort",
+        choices=("name", "newest", "oldest"),
+        default="name",
+        help="initial listing sort (cycle in-app with 'o'; default: name)",
+    )
+    ui.add_argument(
+        "--config",
+        metavar="FILE",
+        help="config file to read (default: ~/.config/smbex/config.ini)",
+    )
+    ui.add_argument(
+        "--write-config",
+        action="store_true",
+        help="write a commented sample config to the config path, then exit",
     )
     ui.add_argument(
         "--translate",
@@ -116,7 +134,16 @@ def _connect_ssh(ssh):
 
 
 def main(argv: list[str] | None = None) -> int:
+    from smbex.config import load_config, write_sample_config
+
     parser = build_parser()
+    # Resolve --config / --write-config first, then seed defaults from the config so
+    # that CLI flags (parsed next) still override. Built-in default < config < flag.
+    pre, _ = parser.parse_known_args(argv)
+    if pre.write_config:
+        print(f"Wrote sample config to {write_sample_config(pre.config)}")
+        return 0
+    parser.set_defaults(**load_config(pre.config))
     args = parser.parse_args(argv)
 
     if args.install_lang:  # one-time model setup; no host connection needed
@@ -172,6 +199,7 @@ def main(argv: list[str] | None = None) -> int:
             label=args.target,
             download_root=Path(args.download_dir) / _safe(spec.ssh.host),
             translator=translator,
+            sort=args.sort,
         ).run()
         return 0
 
@@ -195,5 +223,6 @@ def main(argv: list[str] | None = None) -> int:
         label=args.target,
         download_root=Path(args.download_dir) / _safe(smb.host),
         translator=translator,
+        sort=args.sort,
     ).run()
     return 0

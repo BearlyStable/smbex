@@ -75,6 +75,14 @@ partial files, skip complete ones, and yield to browsing so navigation stays sna
 Optional extras: `--preload` prefetches surrounding folders (toggle with `p`);
 `--translate <lang>` shows English filename translations beside the originals
 (toggle with `t`), computed on-box — see *Install* for the one-time model setup.
+Press `?` for the key reference. If a link drops it's reported and you press `r`
+to reconnect (a deliberate new login); `--auto-reconnect` heals silently instead.
+
+Defaults live in a config file (`~/.config/smbex/config.ini`; flags override it):
+
+```sh
+python3 -m smbex --write-config          # drop a commented sample, then edit it
+```
 
 ## Try it out (local demo, no root)
 

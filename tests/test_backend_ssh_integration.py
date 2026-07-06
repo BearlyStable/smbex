@@ -52,6 +52,32 @@ async def test_browse_ssh_through_the_tui(sftp_server):
         await pilot.press("q")
 
 
+async def test_ssh_reconnect_after_drop(sftp_server):
+    """A dropped SSH transport is classified as a connection error and the manual
+    reconnect (the 'r' path) rebuilds the session against the same server."""
+    from smbex.gateway import Gateway
+
+    auth = build_ssh_auth(
+        f"ssh://tester:secret@{sftp_server['host']}:{sftp_server['port']}"
+    )
+    backend = SshBackend.connect(auth)
+    backend.list("")  # establish
+    raw = backend._client.get_transport().sock  # realistic drop: kill the socket
+    raw.close()
+
+    states: list[str] = []
+    async with Gateway(backend, on_status=states.append) as gw:
+        with pytest.raises(Exception):
+            await gw.list("")  # default is manual: report + propagate, no auto-heal
+        assert gw.connection_lost is True  # i.e. classified as a connection error
+        assert states == ["disconnected"]
+
+        assert await gw.reconnect() is True  # rebuild the SSH/SFTP session
+        names = sorted(e.name for e in await gw.list(""))
+        assert "readme.txt" in names
+    assert states == ["disconnected", "reconnecting", "connected"]
+
+
 async def test_recursive_download_over_real_ssh(sftp_server, tmp_path):
     from smbex.download import DownloadManager
     from smbex.gateway import Gateway

@@ -19,7 +19,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widgets import Footer, Header, Static
 
-from smbex.browser import Browser, SORT_LABELS
+from smbex.browser import Browser, SORT_BY_LABEL, SORT_LABELS
 from smbex.download import DownloadManager
 from smbex.gateway import Gateway
 from smbex.translate import Translator, translate_name
@@ -83,10 +83,12 @@ class SmbexApp(App):
         label: str = "",
         download_root: Path | str = "downloads",
         translator: Translator | None = None,
+        sort: str = "name",
     ):
         super().__init__()
         self._gateway = gateway
         self.browser = Browser(gateway, preload=preload)
+        self.browser.sort_mode = SORT_BY_LABEL.get(sort, "name")  # initial view sort
         self._downloads = DownloadManager(gateway, Path(download_root))
         self._start_path = start_path
         self._label = label
