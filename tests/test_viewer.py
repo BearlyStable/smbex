@@ -59,7 +59,7 @@ async def test_enter_scroll_and_leave_file_view(make_app, tmp_path):
         await pilot.press("q")
 
 
-async def test_view_two_page_layout_without_translation(make_app, tmp_path):
+async def test_view_single_column_without_translation(make_app, tmp_path):
     content = "".join(f"row{i}\n" for i in range(200))
     app = make_app({"share": {"big.txt": content.encode()}}, download_root=tmp_path)
     async with app.run_test(size=(90, 24)) as pilot:
@@ -67,12 +67,9 @@ async def test_view_two_page_layout_without_translation(make_app, tmp_path):
         await pilot.press("l")
         await pilot.press("l")
         await pilot.pause()
-        # right column continues where the middle leaves off (a two-page view)
-        right = app.query_one("#preview", Column).rendered_text
-        mid = app.query_one("#current", Column).rendered_text
-        assert "row0" in mid and "row0" not in right and any(
-            f"row{n}" in right for n in range(10, 40)
-        )
+        # no translation -> one wide column: the preview column is hidden
+        assert app.query_one("#preview", Column).has_class("hidden")
+        assert "row0" in app.query_one("#current", Column).rendered_text
         await pilot.press("q")
 
 

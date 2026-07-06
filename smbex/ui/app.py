@@ -523,8 +523,7 @@ class SmbexApp(App):
             return
         self._view = _FileViewState(entry.name, source, kind)
         self.query_one("#parent", Column).add_class("hidden")  # focus on the file
-        self.query_one("#preview", Column).remove_class("hidden")
-        self._render_view()
+        self._render_view()  # manages the preview column (shown only when translating)
 
     def _close_file_view(self) -> None:
         if self._view is None:
@@ -542,10 +541,8 @@ class SmbexApp(App):
         return (h - 2) if h and h > 2 else 30
 
     def _view_page(self) -> int:
-        """Lines to advance for a page: one screenful — two panes when not translating."""
-        rows = self._view_rows()
-        translating = self._view_translating()
-        return rows if translating else rows * 2
+        """Lines/rows to advance for a page — one screenful of the (single) column."""
+        return self._view_rows()
 
     def _view_translating(self) -> bool:
         return bool(
@@ -570,11 +567,13 @@ class SmbexApp(App):
         rows = self._view_rows()
         mid = self.query_one("#current", Column)
         right = self.query_one("#preview", Column)
+        # One wide column, except the translation case which needs original | English.
+        translating = self._view_translating()
+        right.set_class(not translating, "hidden")
 
-        if v.kind == "hex":  # xxd view: two continuous pages, no translation
+        if v.kind == "hex":  # xxd view — a single scrolling column
             v.top = max(0, min(v.top, max(0, v.lazy.rows - 1)))
             mid.show_lines(v.lazy.window(v.top, rows), gutter=False)
-            right.show_lines(v.lazy.window(v.top + rows, rows), gutter=False)
             self._update_status()
             return
 
@@ -582,12 +581,10 @@ class SmbexApp(App):
             v.top = max(0, min(v.top, v.lazy.loaded - 1))
         lines = v.lazy.window(v.top, rows)
         mid.show_lines(lines, start=v.top)
-        if self._view_translating():  # middle = original, right = translation (aligned)
+        if translating:  # middle = original, right = translation (aligned)
             translated = [v.translations.get(v.top + i) for i in range(len(lines))]
             right.show_lines([""] * len(lines), start=v.top, translated=translated)
             self._translate_view_window(v, v.top, lines)
-        else:  # two-page view: middle = this screen, right = the next screen
-            right.show_lines(v.lazy.window(v.top + rows, rows), start=v.top + rows)
         self._update_status()
 
     def _translate_view_window(self, v, top: int, lines: list) -> None:
@@ -656,7 +653,7 @@ class SmbexApp(App):
             else:
                 unit = "line"
                 total = f"{v.lazy.loaded}{'' if v.lazy.eof else '+'}"
-                mode = "orig|translation" if self._view_translating() else "2-page"
+                mode = "orig|translation" if self._view_translating() else "text"
                 hint = "j/k scroll · t translate · h/Esc back"
             self.query_one("#status", Static).update(
                 f" VIEW {v.name} │ {unit} {v.top + 1}/{total} │ {mode} │ {hint}"
