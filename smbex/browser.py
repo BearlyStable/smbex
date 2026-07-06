@@ -85,9 +85,12 @@ class Browser:
         return entries
 
     async def load(self, path: str | None = None) -> list[DirEntry]:
-        if path is not None:
-            self.path = path
-        self.entries = self._sorted(await self.listdir(self.path))
+        # Fetch first, then commit: if the listing fails (e.g. a dropped link), the
+        # browser stays put instead of moving to a folder it couldn't read.
+        target = self.path if path is None else path
+        entries = self._sorted(await self.listdir(target))
+        self.path = target
+        self.entries = entries
         remembered = self._cursor_memory.get(self.path, 0)
         self.cursor = min(max(remembered, 0), len(self.entries) - 1) if self.entries else 0
         self.preload_surroundings()  # warm neighbouring folders (Phase 6; toggle-gated)

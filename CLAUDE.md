@@ -68,22 +68,30 @@ a slow connection. Target features (full list — most are still ahead):
 > skipped when the model/engine is absent. Not done: language auto-detection (source
 > is user-specified); smarter `snake_case`/compound handling (stem is one token).
 
-> Phase 8 note (reconnect/recovery — done): the gateway recovers a dropped link.
-> `Gateway._execute` runs each job and, if it raises a **connection-class** error
-> (per the backend's `is_connection_error`), calls `reconnect()` (up to
-> `reconnect_attempts`, `reconnect_delay` between) and retries the job **once** on the
-> fresh connection; it emits `on_status` = reconnecting/connected/disconnected, which
-> the app shows as a coloured status banner (`_on_conn_status`). Backends retain their
-> auth (`SmbAuth`/`SshAuth`) and rebuild in `reconnect()`. Classifiers target socket/
-> transport errors (OSError/EOFError/Timeout/NetBIOSError for SMB; those + paramiko
-> `SSHException` for SSH) — operational errors like "not found" (impacket `SessionError`)
-> propagate untouched. **Verified against a live SMB server** (socket-drop → OSError →
-> reconnect → retry recovers); a torn-down impacket connection can instead raise
-> `AttributeError` (only after an explicit `close()`, not a real drop) — not caught by
-> design. Browsing recovers transparently; a download's in-flight handle can't survive
-> a reconnect, so that transfer errors and resumes when re-grabbed. Tested in
-> `tests/test_reconnect.py` (FakeBackend `drop_next`/`reconnect_fails`). Remaining
-> Phase 8: help screen, config file, theming.
+> Phase 8 note (reconnect/recovery — done): the gateway handles a dropped link, and
+> reconnect is **operator-driven by default** — a silent reconnect makes a fresh
+> login/session event, which an operator may not want. `Gateway._execute` classifies
+> a failure via the backend's `is_connection_error` (socket/transport: OSError/EOFError/
+> Timeout/NetBIOSError for SMB; those + paramiko `SSHException` for SSH — operational
+> errors like impacket `SessionError` "not found" propagate untouched):
+> - **default (`auto_reconnect=False`)**: record the drop, emit `on_status`
+>   "disconnected", and propagate; while down, jobs fail fast (but cached listings
+>   still serve). `Gateway.reconnect()` — the `r` key (`action_reconnect`) — does one
+>   deliberate reconnect (the only new login event). `_execute` runs it as a *raw* job
+>   so it isn't itself wrapped in drop handling.
+> - **`--auto-reconnect`**: heal transparently — reconnect (up to `reconnect_attempts`,
+>   `reconnect_delay` apart) and retry the job once.
+> `on_status` (reconnecting/connected/disconnected) drives a coloured status banner
+> (`_on_conn_status`); disconnected shows "press 'r' to reconnect". Backends retain
+> auth (`SmbAuth`/`SshAuth`) and rebuild in `reconnect()`. `Browser.load` is atomic
+> (fetch then commit) so a dropped navigation stays put; `_refresh` tolerates a drop in
+> the parent/preview fetches (current column always renders from memory). Browsing
+> recovers; a download's in-flight handle can't survive a reconnect, so that transfer
+> errors and resumes when re-grabbed. **Verified against a live SMB server** both ways
+> (socket-drop → OSError; default reports + waits, `r` recovers; `--auto-reconnect`
+> heals+retries). A torn-down impacket conn can instead raise `AttributeError` (only
+> after an explicit `close()`, not a real drop) — not caught by design. Tested in
+> `tests/test_reconnect.py`. Remaining Phase 8: help screen, config file, theming.
 
 > Timestamps note: entries show a compact age (`columns.py` `human_time`: '5m'/'3h'/
 > '2d'/'3w'/'6mo'/'2y', blank for unknown mtime=0) in every column; the file preview
@@ -136,7 +144,8 @@ Smaller items raised in discussion (not blocking):
 Actual keybindings today: `h/j/k/l`+arrows, `g`/`G`, `l`/`Enter` open, `h` up,
 `d` download selected (file, or folder recursively), `a` all files here, `w` task
 panel, `o` cycle sort (name→newest→oldest), `p` preload toggle (prefetches
-surrounding folders), `t` translate toggle (English beside originals; needs
+surrounding folders), `r` reconnect (after a dropped link; auto only with
+`--auto-reconnect`), `t` translate toggle (English beside originals; needs
 `--translate <lang>`), `q` quit.
 
 ## Install & environment

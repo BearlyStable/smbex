@@ -69,6 +69,7 @@ class SmbexApp(App):
         Binding("p", "toggle_preload", "Preload"),
         Binding("t", "toggle_translate", "Translate"),
         Binding("o", "cycle_sort", "Sort"),
+        Binding("r", "reconnect", "Reconnect"),
     ]
 
     def __init__(
@@ -169,6 +170,17 @@ class SmbexApp(App):
         self.browser.cycle_sort()  # re-sorts the current view, keeping the selection
         await self._refresh()
 
+    async def action_reconnect(self) -> None:
+        """Operator-driven reconnect (the 'r' key). The only way the link comes back
+        unless --auto-reconnect is set — so a new login event is intentional."""
+        if self._conn_state == "reconnecting":
+            return
+        if await self._gateway.reconnect():
+            try:
+                await self._refresh()  # re-render (cached listings still serve)
+            except Exception as exc:
+                self._status_error(exc)
+
     def _entry_translations(self, entries: list) -> list[str] | None:
         """English renderings parallel to ``entries``, or None when off/unavailable."""
         if not (self.translate_enabled and self._translator and self._translator.available):
@@ -260,13 +272,23 @@ class SmbexApp(App):
     # --- rendering ------------------------------------------------------------
     async def _refresh(self) -> None:
         browser = self.browser
-        parent = await browser.parent_entries()
-        preview = await browser.preview_entries()
+        # The parent/preview columns fetch (cache-backed); tolerate a dropped link and
+        # just leave them empty. The current column renders from in-memory entries (no
+        # fetch), so a drop never blanks the view you're on — and it renders *after*
+        # the preview fetch so its cache marker reflects the just-warmed child.
+        try:
+            parent = await browser.parent_entries()
+        except Exception:
+            parent = []
+        try:
+            preview = await browser.preview_entries()
+        except Exception:
+            preview = None
 
+        self._render_current()
         self.query_one("#parent", Column).show(
             parent, cursor=browser.parent_cursor(parent), translations=self._entry_translations(parent)
         )
-        self._render_current()
         preview_col = self.query_one("#preview", Column)
         if preview is None:
             preview_col.show_file(browser.selected, translated=self._name_translation(browser.selected))
@@ -319,12 +341,19 @@ class SmbexApp(App):
             self.query_one("#status", Static).update(text)
         else:
             # Link down/recovering: lead with a prominent, coloured banner.
-            banner = "⟳ reconnecting…" if self._conn_state == "reconnecting" else "⚠ disconnected"
-            style = "bold yellow" if self._conn_state == "reconnecting" else "bold red"
+            if self._conn_state == "reconnecting":
+                banner, style = "⟳ reconnecting…", "bold yellow"
+            else:
+                banner, style = "⚠ disconnected — press 'r' to reconnect", "bold red"
             line = Text(" ")
             line.append(banner, style=style)
             line.append(text)
             self.query_one("#status", Static).update(line)
 
     def _status_error(self, exc: Exception) -> None:
+        # A dropped link already shows the reconnect banner; don't clobber it with the
+        # raw exception text.
+        if self._conn_state != "connected":
+            self._update_status()
+            return
         self.query_one("#status", Static).update(Text(f" error: {exc}", style="bold red"))

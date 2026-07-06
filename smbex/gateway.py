@@ -33,6 +33,7 @@ class _Job:
     seq: int
     func: Callable[[], Any] = field(compare=False)
     future: "asyncio.Future" = field(compare=False)
+    raw: bool = field(default=False, compare=False)  # bypass reconnect handling
 
 
 class Gateway:
@@ -40,6 +41,7 @@ class Gateway:
         self,
         backend: Backend,
         *,
+        auto_reconnect: bool = False,
         on_status: Callable[[str], None] | None = None,
         reconnect_attempts: int = 3,
         reconnect_delay: float = 0.5,
@@ -48,10 +50,20 @@ class Gateway:
         self._queue: "asyncio.PriorityQueue[_Job]" = asyncio.PriorityQueue()
         self._seq = itertools.count()
         self._worker: asyncio.Task | None = None
+        # Off by default: a silent reconnect creates a fresh login/session event,
+        # which an operator may not want. Default is to report the drop and wait for
+        # an explicit reconnect (Gateway.reconnect, bound to a key). --auto-reconnect
+        # opts into transparent healing.
+        self._auto_reconnect = auto_reconnect
+        self._connection_lost = False
         #: Called with "reconnecting" / "connected" / "disconnected" on link changes.
         self.on_status = on_status
         self._reconnect_attempts = reconnect_attempts
         self._reconnect_delay = reconnect_delay
+
+    @property
+    def connection_lost(self) -> bool:
+        return self._connection_lost
 
     async def start(self) -> None:
         if self._worker is None:
@@ -61,7 +73,10 @@ class Gateway:
         while True:
             job = await self._queue.get()
             try:
-                result = await self._execute(job.func)
+                # Raw jobs (a manual reconnect) run directly, without drop handling.
+                result = await (
+                    asyncio.to_thread(job.func) if job.raw else self._execute(job.func)
+                )
                 if not job.future.done():
                     job.future.set_result(result)
             except Exception as exc:  # propagate to the awaiting caller
@@ -71,21 +86,31 @@ class Gateway:
                 self._queue.task_done()
 
     async def _execute(self, func: Callable[[], Any]) -> Any:
-        """Run a job; on a lost connection, reconnect once and retry it.
+        """Run a job, handling a lost connection per the auto-reconnect setting.
 
         Only connection-class errors (per the backend's ``is_connection_error``)
-        trigger recovery — normal failures like "not found" propagate untouched.
-        Handle-based jobs (an in-flight download's ranged read) can't be retried on
-        the fresh connection, so they surface an error; the transfer resumes if
-        re-queued. Browsing, being stateless, recovers transparently.
+        count as a drop — normal failures like "not found" propagate untouched.
+        With auto-reconnect on, the link is healed and the job retried once (browsing
+        recovers transparently; a download's in-flight handle can't survive, so that
+        transfer errors and resumes when re-grabbed). With it off (default), the drop
+        is recorded and reported and the error propagates; the operator reconnects
+        with :meth:`reconnect`. While the link is known-down we fail fast instead of
+        hammering the backend — but cached listings still serve, so cached areas stay
+        browsable offline.
         """
+        if self._connection_lost and not self._auto_reconnect:
+            raise ConnectionError("connection lost; press 'r' to reconnect")
         try:
             return await asyncio.to_thread(func)
         except Exception as exc:
             if not self._is_connection_error(exc):
                 raise
-            await self._reconnect()  # raises if it gives up -> caller sees the error
-            return await asyncio.to_thread(func)  # one retry on the new connection
+            if self._auto_reconnect:
+                await self._reconnect()  # heal (raises if it gives up), then retry
+                return await asyncio.to_thread(func)
+            self._connection_lost = True
+            self._set_status("disconnected")
+            raise
 
     def _is_connection_error(self, exc: BaseException) -> bool:
         checker = getattr(self._backend, "is_connection_error", None)
@@ -95,6 +120,7 @@ class Gateway:
             return False
 
     async def _reconnect(self) -> None:
+        """Auto-mode healing: try to reconnect a few times, else give up (raises)."""
         reconnect = getattr(self._backend, "reconnect", None)
         if reconnect is None:
             raise RuntimeError("backend cannot reconnect")
@@ -103,13 +129,36 @@ class Gateway:
         for _ in range(self._reconnect_attempts):
             try:
                 await asyncio.to_thread(reconnect)
+                self._connection_lost = False
                 self._set_status("connected")
                 return
             except Exception as exc:  # keep trying until attempts run out
                 last = exc
                 await asyncio.sleep(self._reconnect_delay)
+        self._connection_lost = True
         self._set_status("disconnected")
         raise last if last is not None else RuntimeError("reconnect failed")
+
+    async def reconnect(self) -> bool:
+        """Explicitly (re)establish the connection — the manual 'r' path.
+
+        One deliberate attempt, serialized through the worker so it can't race an
+        in-flight backend call. Returns True on success. This is the *only* way the
+        link comes back when auto-reconnect is off, keeping login events operator-driven.
+        """
+        reconnect = getattr(self._backend, "reconnect", None)
+        if reconnect is None:
+            return False
+        self._set_status("reconnecting")
+        try:
+            await self._submit_raw(int(Priority.BROWSE), reconnect)
+        except Exception:
+            self._connection_lost = True
+            self._set_status("disconnected")
+            return False
+        self._connection_lost = False
+        self._set_status("connected")
+        return True
 
     def _set_status(self, state: str) -> None:
         if self.on_status is not None:
@@ -121,6 +170,11 @@ class Gateway:
     async def _submit(self, priority: int, func: Callable[[], Any]) -> Any:
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         await self._queue.put(_Job(int(priority), next(self._seq), func, future))
+        return await future
+
+    async def _submit_raw(self, priority: int, func: Callable[[], Any]) -> Any:
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
+        await self._queue.put(_Job(priority, next(self._seq), func, future, raw=True))
         return await future
 
     # --- public API -----------------------------------------------------------

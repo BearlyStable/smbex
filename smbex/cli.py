@@ -62,6 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="prefetch surrounding folders while browsing (default: off; toggle in-app with 'p')",
     )
     ui.add_argument(
+        "--auto-reconnect",
+        action="store_true",
+        help="silently reconnect after a dropped link (default: off — report the drop "
+        "and wait for 'r', so a new login/session event is operator-driven)",
+    )
+    ui.add_argument(
         "--translate",
         metavar="LANG",
         help="show English translations of filenames from LANG (e.g. de); toggle in-app with 't'. "
@@ -160,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
     if spec.proto is Proto.SSH:
         backend = _connect_ssh(spec.ssh)
         SmbexApp(
-            Gateway(backend),
+            Gateway(backend, auto_reconnect=args.auto_reconnect),
             start_path=getattr(backend, "start_rel", ""),
             preload=args.preload,
             label=args.target,
@@ -184,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"connection failed: {exc}")
 
     SmbexApp(
-        Gateway(backend),
+        Gateway(backend, auto_reconnect=args.auto_reconnect),
         preload=args.preload,
         label=args.target,
         download_root=Path(args.download_dir) / _safe(smb.host),
