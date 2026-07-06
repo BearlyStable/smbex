@@ -25,6 +25,7 @@ from smbex.gateway import Gateway
 from smbex.translate import Translator, translate_name
 from smbex.ui.columns import Column
 from smbex.ui.downloads import DownloadPanel
+from smbex.ui.help import HelpScreen
 
 
 class SmbexApp(App):
@@ -70,6 +71,7 @@ class SmbexApp(App):
         Binding("t", "toggle_translate", "Translate"),
         Binding("o", "cycle_sort", "Sort"),
         Binding("r", "reconnect", "Reconnect"),
+        Binding("question_mark", "help", "Help"),
     ]
 
     def __init__(
@@ -169,6 +171,9 @@ class SmbexApp(App):
     async def action_cycle_sort(self) -> None:
         self.browser.cycle_sort()  # re-sorts the current view, keeping the selection
         await self._refresh()
+
+    def action_help(self) -> None:
+        self.push_screen(HelpScreen())
 
     async def action_reconnect(self) -> None:
         """Operator-driven reconnect (the 'r' key). The only way the link comes back

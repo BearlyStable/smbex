@@ -36,7 +36,7 @@ a slow connection. Target features (full list — most are still ahead):
 | 5 | Prioritization & throttling (browse preempts downloads) | **done** (core; see note) |
 | 6 | Preloader (surrounding folders, toggle) | **done** |
 | 7 | Offline translation (CTranslate2 + SentencePiece) + toggle | **done** |
-| 8 | Polish (help, reconnect, config, theming) | **in progress** (reconnect done) |
+| 8 | Polish (help, reconnect, config, theming) | **in progress** (reconnect + help done) |
 
 > Phase 5 note: the throttle (browse preempts an in-flight download between chunks)
 > is implemented and tested (`test_browse_preempts_between_download_chunks`). What
@@ -91,7 +91,12 @@ a slow connection. Target features (full list — most are still ahead):
 > (socket-drop → OSError; default reports + waits, `r` recovers; `--auto-reconnect`
 > heals+retries). A torn-down impacket conn can instead raise `AttributeError` (only
 > after an explicit `close()`, not a real drop) — not caught by design. Tested in
-> `tests/test_reconnect.py`. Remaining Phase 8: help screen, config file, theming.
+> `tests/test_reconnect.py`. Remaining Phase 8: config file, theming.
+
+> Help note: `?` opens a dismissible modal (`smbex/ui/help.py`, `HelpScreen` +
+> `help_text`) listing keys grouped Navigate/Transfer/View/Connection; Esc/`?`/`q`
+> close it. Curated by hand to mirror `SmbexApp.BINDINGS`. Tested in
+> `tests/test_ui_help.py`.
 
 > Timestamps note: entries show a compact age (`columns.py` `human_time`: '5m'/'3h'/
 > '2d'/'3w'/'6mo'/'2y', blank for unknown mtime=0) in every column; the file preview
@@ -146,7 +151,7 @@ Actual keybindings today: `h/j/k/l`+arrows, `g`/`G`, `l`/`Enter` open, `h` up,
 panel, `o` cycle sort (name→newest→oldest), `p` preload toggle (prefetches
 surrounding folders), `r` reconnect (after a dropped link; auto only with
 `--auto-reconnect`), `t` translate toggle (English beside originals; needs
-`--translate <lang>`), `q` quit.
+`--translate <lang>`), `?` help overlay, `q` quit.
 
 ## Install & environment
 
@@ -253,6 +258,7 @@ smbex/
     app.py               ✓ Textual ranger UI (parent|current|preview, dark default)
     columns.py           ✓ Miller-column widget
     downloads.py         ✓ download/task panel (progress bars)
+    help.py              ✓ '?' help overlay (ModalScreen, keybindings by group)
 tests/                   pytest; FakeBackend + live SMB server fixtures
 ```
 
