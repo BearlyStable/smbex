@@ -85,9 +85,10 @@ to reconnect (a deliberate new login); `--auto-reconnect` heals silently instead
 `--theme <name>` (dark/light/nord/gruvbox) sets the colour theme; `T` switches it.
 `[` / `]` hide the parent / preview column to save space. A downloaded file's
 content shows in the preview pane (text, or an xxd-style hex dump for binaries).
-Press `l`/`Enter` on a downloaded **text** file to open a full content viewer:
-`j/k` scroll (it loads more from disk lazily, so large files open instantly), and
-with translation on it shows the original and English **side by side**; `h`/`Esc` back.
+Press `l`/`Enter` on a downloaded file to open a full content viewer: text scrolls
+with `j/k` (loaded lazily, so large files open instantly) and, with translation on,
+shows the original and English **side by side**; a binary opens as a scrollable
+xxd-style **hex** view. `h`/`Esc` goes back.
 
 Defaults live in a config file (`~/.config/smbex/config.ini`; flags override it):
 

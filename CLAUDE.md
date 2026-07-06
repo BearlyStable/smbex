@@ -172,9 +172,13 @@ a slow connection. Feature list (all implemented — phases 0–9 done):
 > file unless you jump to the end (`G`). Height comes from the `#columns` container
 > (the columns auto-size to content, so their own size can't drive the window); re-fit
 > on `on_resize`. `j/k` scroll, `PgUp/PgDn` page, `g/G` top/bottom, `h/Esc` back.
-> Undownloaded or binary files don't enter the viewer (a status hint says why); the
-> download behaviour is unchanged. `Column.show_lines` renders a line-number gutter.
-> Tested in `tests/test_viewer.py`.
+> A **binary** file opens instead as a scrollable xxd **hex** view (`LazyHex`, seeks
+> straight to each 16-byte window, so a huge binary opens instantly; no translation,
+> two-page). Undownloaded files don't enter the viewer (a status hint says why); the
+> download behaviour is unchanged. `Column.show_lines(gutter=…)` renders a line-number
+> gutter (off for hex rows, which carry their own offset). Tested in
+> `tests/test_viewer.py`. The demo server (`scripts/demo_server.py`) seeds multi-screen
+> Japanese `.txt` docs and real image/binary files (写真/, 素材/) to exercise both modes.
 
 > Preview note: when the selected file is fully downloaded (`_downloaded_local_path`:
 > mirror file exists and complete), the preview pane shows its **local** content via
@@ -330,7 +334,7 @@ smbex/
   cache.py               ✓ in-memory, session-only listing cache
   config.py              ✓ INI config (~/.config/smbex/config.ini); built-in<config<CLI
   preview.py             ✓ bounded text/hex preview of a downloaded file
-  viewer.py              ✓ windowed lazy line reader for the file content viewer
+  viewer.py              ✓ windowed lazy readers for the content viewer (LazyLines / LazyHex)
   browser.py             ✓ ranger navigation controller (cache-backed, cursor memory)
   download.py            ✓ background DownloadManager (resume/skip, mirror, throttled; one handle/file)
   preload.py             ✓ surrounding-folder preloader (PRELOAD-priority, toggle-gated)

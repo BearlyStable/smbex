@@ -23,9 +23,9 @@ _SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("o", "cycle sort: name / newest / oldest"),
     ]),
     ("View a file", [
-        ("l / Enter", "open a downloaded text file"),
-        ("j/k g/G", "scroll (loads more lazily)"),
-        ("t", "original + English side by side"),
+        ("l / Enter", "open a downloaded file (text or hex)"),
+        ("j/k g/G", "scroll (loads lazily)"),
+        ("t", "text: original + English side by side"),
         ("h / Esc", "back to the listing"),
     ]),
     ("Transfer", [

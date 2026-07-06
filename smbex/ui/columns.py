@@ -149,15 +149,21 @@ class Column(Static):
         self.update(text)
 
     def show_lines(
-        self, lines: list[str], start: int = 0, translated: list | None = None
+        self,
+        lines: list[str],
+        start: int = 0,
+        translated: list | None = None,
+        gutter: bool = True,
     ) -> None:
-        """Render a window of file content with a line-number gutter (starting at
-        ``start``). If ``translated`` (parallel to ``lines``) is given, show each
-        translated line instead — a ``None`` entry means "not translated yet"."""
+        """Render a window of file content, optionally with a line-number gutter
+        (starting at ``start``; off for hex rows that carry their own offset). If
+        ``translated`` (parallel to ``lines``) is given, show each translated line
+        instead — a ``None`` entry means "not translated yet"."""
         text = Text(no_wrap=True, overflow="ellipsis")
-        gutter = len(str(start + len(lines))) if lines else 1
+        width = len(str(start + len(lines))) if lines else 1
         for i, line in enumerate(lines):
-            text.append(f"{start + i + 1:>{gutter}} ", style="dim")
+            if gutter:
+                text.append(f"{start + i + 1:>{width}} ", style="dim")
             if translated is not None:
                 rendered = translated[i] if i < len(translated) else None
                 text.append("" if rendered is None else rendered, style="green")

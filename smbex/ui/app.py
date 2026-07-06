@@ -35,12 +35,13 @@ _THEME_CYCLE = ["textual-dark", "textual-light", "nord", "gruvbox"]
 
 
 class _FileViewState:
-    """A downloaded text file open in the content viewer (windowed + lazy translate)."""
+    """A downloaded file open in the content viewer (windowed; lazy translate/hex)."""
 
-    def __init__(self, name: str, lazy):
+    def __init__(self, name: str, source, kind: str):
         self.name = name
-        self.lazy = lazy  # viewer.LazyLines
-        self.top = 0  # index of the first visible line
+        self.lazy = source  # viewer.LazyLines (text) or viewer.LazyHex (hex)
+        self.kind = kind  # "text" | "hex"
+        self.top = 0  # index of the first visible line / hex row
         self.translations: dict[int, str] = {}  # line index -> translated text
 
 
@@ -190,8 +191,12 @@ class SmbexApp(App):
 
     async def action_cursor_bottom(self) -> None:
         if self._view is not None:
-            self._view.lazy.load_all()  # explicit jump-to-end reads the rest
-            self._view.top = max(0, self._view.lazy.loaded - self._view_rows())
+            v = self._view
+            if v.kind == "hex":
+                v.top = max(0, v.lazy.rows - self._view_rows())
+            else:
+                v.lazy.load_all()  # explicit jump-to-end reads the rest
+                v.top = max(0, v.lazy.loaded - self._view_rows())
             self._render_view()
             return
         self.browser.move_to(self.browser.count - 1)
@@ -499,25 +504,24 @@ class SmbexApp(App):
 
     # --- file content viewer (windowed, lazy translate) -----------------------
     def _enter_file_view(self, entry) -> None:
-        """Open a downloaded text file's content in the columns. No-op (with a hint)
-        for a file that isn't downloaded or isn't text — downloads stay explicit."""
+        """Open a downloaded file's content in the columns — text (scroll + translate)
+        or an xxd hex view for a binary. No-op (with a hint) for a file that isn't
+        downloaded; downloads stay explicit."""
         local = self._downloaded_local_path(entry)
         if local is None:
             self._status_note(f"'{entry.name}' isn't downloaded yet — press 'd' first")
             return
-        try:
-            from smbex.preview import looks_binary
+        from smbex.preview import looks_binary
+        from smbex.viewer import LazyHex, LazyLines
 
+        try:
             with open(local, "rb") as f:
-                if looks_binary(f.read(4096)):
-                    self._status_note(f"'{entry.name}' is binary — no text view")
-                    return
+                binary = looks_binary(f.read(4096))
+            source, kind = (LazyHex(local), "hex") if binary else (LazyLines(local), "text")
         except Exception as exc:
             self._status_error(exc)
             return
-        from smbex.viewer import LazyLines
-
-        self._view = _FileViewState(entry.name, LazyLines(local))
+        self._view = _FileViewState(entry.name, source, kind)
         self.query_one("#parent", Column).add_class("hidden")  # focus on the file
         self.query_one("#preview", Column).remove_class("hidden")
         self._render_view()
@@ -544,7 +548,13 @@ class SmbexApp(App):
         return rows if translating else rows * 2
 
     def _view_translating(self) -> bool:
-        return bool(self.translate_enabled and self._translator and self._translator.available)
+        return bool(
+            self._view is not None
+            and self._view.kind == "text"  # no translation for a hex view
+            and self.translate_enabled
+            and self._translator
+            and self._translator.available
+        )
 
     def _scroll_view(self, delta: int) -> None:
         v = self._view
@@ -558,18 +568,26 @@ class SmbexApp(App):
         if v is None:
             return
         rows = self._view_rows()
-        if v.lazy.eof:  # don't scroll past the end once the length is known
+        mid = self.query_one("#current", Column)
+        right = self.query_one("#preview", Column)
+
+        if v.kind == "hex":  # xxd view: two continuous pages, no translation
+            v.top = max(0, min(v.top, max(0, v.lazy.rows - 1)))
+            mid.show_lines(v.lazy.window(v.top, rows), gutter=False)
+            right.show_lines(v.lazy.window(v.top + rows, rows), gutter=False)
+            self._update_status()
+            return
+
+        if v.lazy.eof:  # text: don't scroll past the end once the length is known
             v.top = max(0, min(v.top, v.lazy.loaded - 1))
         lines = v.lazy.window(v.top, rows)
-        self.query_one("#current", Column).show_lines(lines, start=v.top)
-        right = self.query_one("#preview", Column)
+        mid.show_lines(lines, start=v.top)
         if self._view_translating():  # middle = original, right = translation (aligned)
             translated = [v.translations.get(v.top + i) for i in range(len(lines))]
             right.show_lines([""] * len(lines), start=v.top, translated=translated)
             self._translate_view_window(v, v.top, lines)
         else:  # two-page view: middle = this screen, right = the next screen
-            page_b = v.lazy.window(v.top + rows, rows)
-            right.show_lines(page_b, start=v.top + rows)
+            right.show_lines(v.lazy.window(v.top + rows, rows), start=v.top + rows)
         self._update_status()
 
     def _translate_view_window(self, v, top: int, lines: list) -> None:
@@ -633,11 +651,15 @@ class SmbexApp(App):
     def _update_status(self) -> None:
         if self._view is not None:  # content-viewer status
             v = self._view
-            total = f"{v.lazy.loaded}{'' if v.lazy.eof else '+'}"
-            mode = "orig|translation" if self._view_translating() else "2-page"
+            if v.kind == "hex":
+                unit, total, mode, hint = "row", v.lazy.rows, "hex", "j/k scroll · h/Esc back"
+            else:
+                unit = "line"
+                total = f"{v.lazy.loaded}{'' if v.lazy.eof else '+'}"
+                mode = "orig|translation" if self._view_translating() else "2-page"
+                hint = "j/k scroll · t translate · h/Esc back"
             self.query_one("#status", Static).update(
-                f" VIEW {v.name} │ line {v.top + 1}/{total} │ {mode} │ "
-                f"j/k scroll · t translate · h/Esc back"
+                f" VIEW {v.name} │ {unit} {v.top + 1}/{total} │ {mode} │ {hint}"
             )
             return
         browser = self.browser

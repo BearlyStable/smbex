@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from smbex.ui.columns import Column
-from smbex.viewer import LazyLines
+from smbex.viewer import LazyHex, LazyLines
 
 
 # --- LazyLines: only read what's needed --------------------------------------
@@ -94,21 +94,39 @@ async def test_view_translation_side_by_side(make_app, tmp_path, fake_translator
         await pilot.press("q")
 
 
-async def test_view_needs_downloaded_text(make_app, tmp_path):
-    blob = bytes(range(48))
+def test_lazy_hex_windows_random_access(tmp_path):
+    p = tmp_path / "b.bin"
+    p.write_bytes(bytes(range(256)))
+    hx = LazyHex(p)
+    assert hx.rows == 16  # 256 bytes / 16
+    w = hx.window(0, 2)
+    assert w[0].startswith("00000000  00 01 02 03") and w[0].rstrip().endswith("........")
+    assert w[1].startswith("00000010  10 11 12 13")
+    assert hx.window(10, 1)[0].startswith("000000a0  a0 a1")  # seeks straight there
+    hx.close()
+
+
+async def test_view_needs_download_then_hex_for_binary(make_app, tmp_path):
+    blob = bytes(range(256)) * 4  # 1024 bytes of binary
     tree = {"share": {"notes.txt": b"hi\n", "blob.bin": blob}}
     app = make_app(tree, download_root=tmp_path)
-    async with app.run_test() as pilot:
+    async with app.run_test(size=(100, 24)) as pilot:
         await pilot.press("l")  # into share; notes.txt selected but NOT downloaded
         await pilot.press("l")
         assert app._view is None  # nothing to view -> no-op
 
         idx = [e.name for e in app.browser.entries].index("blob.bin")
         app.browser.move_to(idx)
-        _mirror_bytes = app._downloads._local_for("share/blob.bin")
-        _mirror_bytes.parent.mkdir(parents=True, exist_ok=True)
-        _mirror_bytes.write_bytes(blob)
+        local = app._downloads._local_for("share/blob.bin")
+        local.parent.mkdir(parents=True, exist_ok=True)
+        local.write_bytes(blob)
         await app._refresh()
-        await pilot.press("l")  # downloaded but binary -> no text view
-        assert app._view is None
+        await pilot.press("l")  # downloaded binary -> scrollable hex view
+        await pilot.pause()
+        assert app._view is not None and app._view.kind == "hex"
+        assert "00000000  00 01 02 03" in app.query_one("#current", Column).rendered_text
+
+        for _ in range(10):  # scroll -> later offsets (seeked, not read from start)
+            await pilot.press("j")
+        assert "000000a0" in app.query_one("#current", Column).rendered_text
         await pilot.press("q")

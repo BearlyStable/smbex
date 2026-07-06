@@ -59,3 +59,40 @@ class LazyLines:
             self._fh.close()
         except Exception:
             pass
+
+
+class LazyHex:
+    """Windowed xxd-style hex view of a local file — 16 bytes per row, random-access.
+
+    Seeks straight to the requested rows, so scrolling a large binary reads only the
+    visible window; the total row count is known up front from the file size."""
+
+    def __init__(self, path: str | Path, width: int = 16):
+        self._fh = open(path, "rb")
+        self._width = width
+        self._size = self._fh.seek(0, 2)  # end -> size
+
+    def window(self, top: int, height: int) -> list[str]:
+        if height <= 0:
+            return []
+        start = max(top, 0) * self._width
+        self._fh.seek(start)
+        data = self._fh.read(height * self._width)
+        rows = []
+        for i in range(0, len(data), self._width):
+            off = start + i
+            chunk = data[i : i + self._width]
+            hexs = " ".join(f"{b:02x}" for b in chunk).ljust(self._width * 3 - 1)
+            ascii_ = "".join(chr(b) if 0x20 <= b < 0x7F else "." for b in chunk)
+            rows.append(f"{off:08x}  {hexs}  {ascii_}")
+        return rows
+
+    @property
+    def rows(self) -> int:
+        return (self._size + self._width - 1) // self._width
+
+    def close(self) -> None:
+        try:
+            self._fh.close()
+        except Exception:
+            pass
