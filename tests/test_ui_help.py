@@ -23,6 +23,18 @@ async def test_question_mark_opens_and_esc_closes(make_app):
         await pilot.press("q")
 
 
+async def test_help_box_actually_renders(make_app):
+    # Regression: the box collapsed to 0x0 (auto-width parent + 100%-width children),
+    # so the modal was an empty square. It must render with a real size.
+    app = make_app()
+    async with app.run_test(size=(84, 30)) as pilot:
+        await pilot.press("question_mark")
+        await pilot.pause()
+        box = app.screen.query_one("#help-box")
+        assert box.size.width > 10 and box.size.height > 5
+        await pilot.press("q")
+
+
 async def test_help_does_not_disturb_navigation(make_app):
     app = make_app()
     async with app.run_test() as pilot:

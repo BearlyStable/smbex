@@ -14,23 +14,23 @@ from textual.widgets import Static
 # (section title, [(keys, description), ...]); a blank title starts an ungrouped run.
 _SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Navigate", [
-        ("h  Left", "up to the parent folder"),
-        ("l  Right  Enter", "open the selected folder"),
-        ("j  Down", "move down"),
-        ("k  Up", "move up"),
+        ("h Left", "up to the parent folder"),
+        ("l Right Enter", "open the selected folder"),
+        ("j Down", "move down"),
+        ("k Up", "move up"),
         ("g / G", "jump to top / bottom"),
         ("o", "cycle sort: name / newest / oldest"),
     ]),
     ("Transfer", [
-        ("d", "download selected (a file, or a folder recursively)"),
-        ("a", "download every file in this folder"),
+        ("d", "download selection (recursive for folders)"),
+        ("a", "download all files here"),
         ("w", "show / hide the task panel"),
     ]),
     ("View", [
-        ("[  ]", "show / hide the parent / preview column"),
-        ("p", "preload surrounding folders (on / off)"),
-        ("t", "translate filenames to English (on / off)"),
-        ("T", "switch colour theme (dark / light / nord / ...)"),
+        ("[  ]", "show / hide parent / preview column"),
+        ("p", "preload surrounding folders"),
+        ("t", "translate filenames to English"),
+        ("T", "cycle colour theme"),
     ]),
     ("Connection", [
         ("r", "reconnect after a dropped link"),
@@ -65,14 +65,14 @@ class HelpScreen(ModalScreen):
     DEFAULT_CSS = """
     HelpScreen { align: center middle; background: $background 60%; }
     #help-box {
-        width: auto; max-width: 90%;
+        width: 66; max-width: 95%;
         height: auto; max-height: 90%;
         padding: 1 2;
         border: round $accent;
         background: $panel;
     }
-    #help-title { text-style: bold; width: 100%; text-align: center; }
-    #help-hint { color: $text-muted; width: 100%; text-align: center; }
+    #help-title { text-style: bold; width: 1fr; text-align: center; }
+    #help-hint { color: $text-muted; width: 1fr; text-align: center; }
     """
 
     def compose(self):
