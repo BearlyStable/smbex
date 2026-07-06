@@ -14,12 +14,12 @@ from textual.widgets import Static
 # (section title, [(keys, description), ...]); a blank title starts an ungrouped run.
 _SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Navigate", [
-        ("h  ←", "up to the parent folder"),
-        ("l  →  ↵", "open the selected folder"),
-        ("j  ↓", "move down"),
-        ("k  ↑", "move up"),
+        ("h  Left", "up to the parent folder"),
+        ("l  Right  Enter", "open the selected folder"),
+        ("j  Down", "move down"),
+        ("k  Up", "move up"),
         ("g / G", "jump to top / bottom"),
-        ("o", "cycle sort: name → newest → oldest"),
+        ("o", "cycle sort: name / newest / oldest"),
     ]),
     ("Transfer", [
         ("d", "download selected (a file, or a folder recursively)"),
@@ -30,7 +30,7 @@ _SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("[  ]", "show / hide the parent / preview column"),
         ("p", "preload surrounding folders (on / off)"),
         ("t", "translate filenames to English (on / off)"),
-        ("T", "switch colour theme (dark / light / …)"),
+        ("T", "switch colour theme (dark / light / nord / ...)"),
     ]),
     ("Connection", [
         ("r", "reconnect after a dropped link"),
@@ -77,7 +77,7 @@ class HelpScreen(ModalScreen):
 
     def compose(self):
         with VerticalScroll(id="help-box"):
-            yield Static("smbex — keys", id="help-title")
+            yield Static("smbex - keybindings", id="help-title")
             yield Static(help_text())
             yield Static("?  or  Esc  to close", id="help-hint")
 

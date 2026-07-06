@@ -104,6 +104,24 @@ async def test_large_download_preview_is_bounded(make_app, tmp_path):
         await pilot.press("q")
 
 
+async def test_preview_updates_when_selected_file_downloads(make_app, tmp_path):
+    # Cursor stays on the file; downloading it must flip the preview to its content.
+    tree = {"share": {"notes.txt": b"hello\nworld\n"}}
+    app = make_app(tree, download_root=tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.press("l")  # into share; notes.txt selected, not downloaded
+        col = app.query_one("#preview", Column)
+        assert "hello\nworld" not in col.rendered_text  # metadata only
+
+        await pilot.press("d")  # download it — cursor does NOT move
+        for _ in range(60):
+            await pilot.pause()
+            if "hello\nworld" in app.query_one("#preview", Column).rendered_text:
+                break
+        assert "hello\nworld" in app.query_one("#preview", Column).rendered_text
+        await pilot.press("q")
+
+
 async def test_preview_translation_appends_section(make_app, tmp_path, fake_translator):
     tr = fake_translator({"hallo": "hello", "welt": "world"})
     tree = {"share": {"de.txt": b"hallo\nwelt\n"}}

@@ -66,7 +66,7 @@ class SmbexApp(App):
         Binding("q", "quit", "Quit"),
         Binding("j,down", "cursor_down", "Down"),
         Binding("k,up", "cursor_up", "Up"),
-        Binding("l,right", "enter", "Open"),
+        Binding("l,right,enter", "enter", "Open"),
         Binding("h,left", "leave", "Up"),
         Binding("g", "cursor_top", "Top"),
         Binding("G", "cursor_bottom", "Bottom"),
@@ -111,6 +111,7 @@ class SmbexApp(App):
         # On when a language was configured (--translate); 't' toggles the display.
         self.translate_enabled = translator is not None
         self._conn_state = "connected"  # updated by the gateway on link changes
+        self._preview_key = None  # what the preview last rendered (to re-render on change)
 
     @property
     def downloads(self) -> DownloadManager:
@@ -353,6 +354,7 @@ class SmbexApp(App):
         (text or hex), or otherwise the selected file's metadata."""
         col = self.query_one("#preview", Column)
         browser = self.browser
+        self._preview_key = self._preview_state()  # remember what we're about to show
         if preview is not None:  # a directory is selected
             col.show(preview, translations=self._entry_translations(preview))
             return
@@ -371,6 +373,14 @@ class SmbexApp(App):
         col.show_preview(sel, kind, body, truncated, translated=self._name_translation(sel))
         if kind == "text":
             self._maybe_translate_preview(sel, body, truncated)
+
+    def _preview_state(self):
+        """A key for what the preview should show, so we know when to re-render it
+        (e.g. a selected file finishing its download while the cursor stays put)."""
+        sel = self.browser.selected
+        if sel is None or sel.is_dir:
+            return None  # only file previews change under a still cursor
+        return (self.browser.path, sel.name, self._downloaded_local_path(sel) is not None)
 
     def _downloaded_local_path(self, entry):
         """The local mirror path if ``entry`` is a fully-downloaded file, else None."""
@@ -430,6 +440,16 @@ class SmbexApp(App):
         try:
             self._refresh_downloads()
             self._render_current()  # keep the status gutter in sync with progress
+            # If the file under the (unmoved) cursor just finished downloading, flip
+            # its preview from metadata to content.
+            sel = self.browser.selected
+            if (
+                self._show_preview
+                and sel is not None
+                and not sel.is_dir
+                and self._preview_state() != self._preview_key
+            ):
+                self._render_preview(None)
         except Exception:
             pass  # widgets may be gone during teardown
 
