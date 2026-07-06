@@ -123,6 +123,31 @@ class Column(Static):
         self.rendered_text = "\n".join(lines)
         self.update(table)
 
+    def show_preview(
+        self,
+        entry: DirEntry,
+        kind: str,
+        body: str,
+        truncated: bool,
+        *,
+        translated: str | None = None,
+        translated_body: str | None = None,
+    ) -> None:
+        """Render a downloaded file's content — text, or an xxd-style hex dump."""
+        text = Text(no_wrap=(kind == "binary"), overflow="fold")
+        text.append(entry.name + "\n", style="bold")
+        if translated and translated != entry.name:
+            text.append(f"→ {translated}\n", style="italic green")
+        text.append(f"{human_size(entry.size)} · {kind} · downloaded\n\n", style="dim")
+        text.append(body, style="dim" if kind == "binary" else "")
+        if truncated:
+            text.append("\n\n… preview truncated", style="dim italic")
+        if translated_body:
+            text.append("\n\n── translation ──\n", style="dim")
+            text.append(translated_body, style="green")
+        self.rendered_text = text.plain
+        self.update(text)
+
     def show_file(self, entry: DirEntry | None, translated: str | None = None) -> None:
         self.shown = []
         if entry is None:

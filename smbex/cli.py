@@ -202,6 +202,15 @@ def main(argv: list[str] | None = None) -> int:
         from smbex.translate import Ct2Translator
 
         translator = Ct2Translator(args.translate)
+        if not translator.available:  # e.g. a typo like 'jp' (Japanese is 'ja')
+            import sys
+
+            print(
+                f"warning: translation for '{args.translate}' is unavailable "
+                f"(model not installed). Install it with:  "
+                f"python -m smbex --install-lang {args.translate}",
+                file=sys.stderr,
+            )
 
     from smbex.auth import Proto, make_conn_spec
 

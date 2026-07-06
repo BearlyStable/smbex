@@ -345,12 +345,82 @@ class SmbexApp(App):
                 parent, cursor=browser.parent_cursor(parent), translations=self._entry_translations(parent)
             )
         if self._show_preview:
-            preview_col = self.query_one("#preview", Column)
-            if preview is None:
-                preview_col.show_file(browser.selected, translated=self._name_translation(browser.selected))
-            else:
-                preview_col.show(preview, translations=self._entry_translations(preview))
+            self._render_preview(preview)
         self._refresh_downloads()
+
+    def _render_preview(self, preview) -> None:
+        """Preview pane: a selected directory's listing, a downloaded file's content
+        (text or hex), or otherwise the selected file's metadata."""
+        col = self.query_one("#preview", Column)
+        browser = self.browser
+        if preview is not None:  # a directory is selected
+            col.show(preview, translations=self._entry_translations(preview))
+            return
+        sel = browser.selected
+        local = self._downloaded_local_path(sel)
+        if local is None:  # not downloaded (or a non-file): just metadata
+            col.show_file(sel, translated=self._name_translation(sel))
+            return
+        try:
+            from smbex.preview import read_preview
+
+            kind, body, truncated = read_preview(local)
+        except Exception:
+            col.show_file(sel, translated=self._name_translation(sel))
+            return
+        col.show_preview(sel, kind, body, truncated, translated=self._name_translation(sel))
+        if kind == "text":
+            self._maybe_translate_preview(sel, body, truncated)
+
+    def _downloaded_local_path(self, entry):
+        """The local mirror path if ``entry`` is a fully-downloaded file, else None."""
+        if entry is None or entry.is_dir:
+            return None
+        remote = self.browser.child_path(entry.name)
+        local = self._downloads._local_for(remote)
+        if not local.is_file():
+            return None
+        done = any(
+            it.remote_path == remote and it.status in ("done", "skipped")
+            for it in self._downloads.items
+        )
+        if done or (entry.size and local.stat().st_size >= entry.size):
+            return local
+        return None
+
+    def _maybe_translate_preview(self, entry, body: str, truncated: bool) -> None:
+        """When translation is on, translate the text preview (bounded) off the event
+        loop and re-render — exclusive so switching files cancels a stale translation."""
+        if not (self.translate_enabled and self._translator and self._translator.available):
+            return
+        key = (self.browser.path, entry.name)
+        self.run_worker(
+            self._translate_preview(entry, body, truncated, key),
+            group="preview-xlate",
+            exclusive=True,
+        )
+
+    async def _translate_preview(self, entry, body: str, truncated: bool, key) -> None:
+        import asyncio
+
+        lines = body.splitlines()[:40]  # bounded: never translate a whole large file
+
+        def work() -> str:
+            return "\n".join(
+                self._translator.translate(ln) if ln.strip() else ln for ln in lines
+            )
+
+        try:
+            translated = await asyncio.to_thread(work)
+        except Exception:
+            return
+        sel = self.browser.selected  # discard if the selection moved on
+        if not self._show_preview or sel is None or (self.browser.path, sel.name) != key:
+            return
+        self.query_one("#preview", Column).show_preview(
+            entry, "text", body, truncated,
+            translated=self._name_translation(entry), translated_body=translated,
+        )
 
     def _refresh_downloads(self) -> None:
         self.query_one("#downloads", DownloadPanel).render_items(self._downloads.items)
