@@ -32,6 +32,18 @@ def test_ftp_backend_lists_reads_and_stats(ftp_server):
         backend.close()
 
 
+def test_binary_read_not_corrupted_after_a_listing(ftp_server):
+    # Regression: FTP defaults to ASCII and MLSD leaves the session in TYPE A, so a
+    # RETR without an explicit TYPE I translates \n -> \r\n. Listing first is what
+    # triggers it; app.log carries newlines that would be corrupted.
+    backend = FtpBackend.connect(_auth(ftp_server))
+    try:
+        backend.list("")  # MLSD -> TYPE A
+        assert b"".join(backend.open_read("logs/app.log")) == b"line1\nline2\n"
+    finally:
+        backend.close()
+
+
 def test_ftp_partial_read_then_control_channel_survives(ftp_server):
     backend = FtpBackend.connect(_auth(ftp_server))
     try:
