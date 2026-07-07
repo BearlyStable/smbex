@@ -142,3 +142,133 @@ The demo share has a `日本語/` folder of Japanese-named files and folders (�
 .venv/bin/python -m pytest -q          # unit + UI tests
 .venv/bin/python -m pytest -m integration   # local SMB/SSH server tests (Phase 1+)
 ```
+
+## Protocol fidelity — how smbex differs from the standard tools
+
+smbex builds on the same libraries the reference tools use (`impacket` for SMB,
+`paramiko` for SSH/SFTP, stdlib `ftplib` for FTP), so the **packets themselves are
+well-formed the same way** — smbex does not hand-roll protocol framing. The
+differences below are all in *usage patterns* (command sequences, frequency, trust
+decisions), not in the bytes on the wire. They are documented here so you can weigh
+the risk against your own hosts, especially fragile or tightly-audited ones.
+
+### SMB — per-file tree-connect churn
+smbex issues one `TREE_CONNECT`/`TREE_DISCONNECT` **per file**, where
+impacket-smbclient and the Windows redirector connect a share **once** and reuse
+that tree for the whole session. Each `open_file` does `connectTree` → `openFile`
+and its close tears both down (`smbex/backend/impacket_backend.py`). Downloading 500
+files is 500 tree cycles here vs. 1 there.
+
+- **Why it's written this way:** statelessness. A cached tree id (`tid`) goes stale
+  after a dropped link (see the reconnect design), so by never holding one across
+  operations we can't reuse a dead `tid`. This is a *simplicity* choice, not a
+  performance one — there is no throughput advantage.
+- **Cost:** on a host with SMB auditing this multiplies tree-connect events; it is
+  slightly more churn than a normal client. It is not malformed and cannot desync the
+  session.
+- **If it matters:** cache `{share: tid}` on the backend, connect-on-first-use, and
+  invalidate it in `reconnect()` — a small, self-contained change that restores
+  one-tree-per-share parity.
+
+### SMB — `stat()` uses a directory FIND, not a file QUERY_INFO
+`stat()` reads a single file's metadata via `listPath` (an SMB2 `QUERY_DIRECTORY`
+against the parent, filename as the search pattern) rather than opening the file and
+issuing `QUERY_INFO`.
+
+- **Why:** SMB2 has no "getattr by path" — a real `QUERY_INFO` requires first
+  **opening the file** (`CREATE`), which emits a file-**access** audit event and
+  participates in sharing-mode/oplock negotiation (you can collide with a process
+  holding the file open). The directory FIND reads the metadata out of the parent's
+  enumeration **without ever opening the file**. On a sensitive host this is the
+  lighter, less-intrusive touch, and it matches impacket-smbclient.
+- **Cost:** it is a directory-query op rather than a handle getinfo, and (today) it
+  carries a tree-connect cycle with it (see above).
+
+### SSH — default host-key policy is trust-on-first-use, not persisted
+The default `auto` policy (`smbex/backend/ssh_backend.py`) **silently accepts an
+unknown host key** and keeps it only in memory. OpenSSH `ssh`/`scp` instead *prompt*
+on an unknown key (and refuse in batch mode), writing accepted keys to
+`~/.ssh/known_hosts`.
+
+- A **changed** key is still rejected (paramiko raises regardless of policy), so the
+  exposure is limited to unknown/first-contact hosts (MITM-susceptible on first
+  connect). Because nothing is written to `known_hosts`, every run is "first contact".
+- **If it matters:** pass `--strict-host-keys` (policy `strict`) to require a
+  pre-known key, matching default OpenSSH behavior.
+
+### SSH — SFTP subsystem, not scp
+smbex speaks the **SFTP subsystem** (`sftp-server`), not the scp protocol. SFTP was
+chosen because it supports listing, `stat`, and seekable/resumable reads — the things
+the browser, resumable downloads, and the lazy preview/viewer need; plain scp is a
+transfer-only subset. On a host where the sftp subsystem is disabled
+(`Subsystem sftp` removed, a `ForceCommand`/restricted shell permitting only scp, or
+old dropbear builds without sftp-server), smbex will fail where `scp` works. See
+**"scp support"** below for the evaluation of adding an scp backend.
+
+### SSH — listings probe symlink targets
+When listing a directory, smbex issues an extra `STAT` on each **symlink target** to
+decide whether a link is a directory (`_to_entry`, `smbex/backend/ssh_backend.py`).
+`ls`/`sftp` use the `lstat` attrs already returned by readdir and do **not** follow
+the link.
+
+- **Why:** so directory-symlinks are browsable (you can `l` into them).
+- **Cost:** extra round trips, and it touches paths you did not navigate to. `stat`
+  does not *open* the target, so the risk is low, but on a sensitive host a link could
+  point at a device node, an automount trigger, or a monitored path.
+
+### FTP — early-stopped reads drain the rest of the file instead of `ABOR`
+A normal FTP client that stops a `RETR` early sends `ABOR`. smbex instead **reads the
+data connection to its natural EOF** and then consumes the single clean `226`
+(`_drain_and_finish`, `smbex/backend/ftp_backend.py`).
+
+- **Why FTP forces the choice:** FTP splits **control** (commands/responses) from
+  **data** (file bytes), and the session invariant is that *every control response
+  must be read by the command that provoked it* — one response left unread and the
+  control channel is off-by-one and wedged. `ABOR` is genuinely awkward: it is
+  preceded by an out-of-band Telnet interrupt (`IAC`+`IP`, then Synch) and the server
+  then emits **two** control responses in a server-dependent order (typically `426`
+  *and* `226`; some do `226`+`225`). Real clients (`lftp`, BSD `ftp`) implement all of
+  that; **`ftplib`'s `abort()` does not** and is known to leave the control channel
+  desynced against many servers. Draining keeps the control channel provably in sync.
+- **The trade-off:** correctness/robustness over bandwidth. For a fragile server the
+  drain is the **conservative** choice — it never leaves the control channel in a weird
+  state (the thing that wedges FTP sessions). The cost is bandwidth: previewing or
+  seeking within a **large** file can pull the rest of that file. It only triggers when
+  you stop **early** — a normal download-to-EOF closes cleanly with no drain.
+- **If the bandwidth ever bites:** the alternative is *not* ftplib's flaky `abort()` —
+  it is to drop and reopen the whole control connection to abandon the transfer, which
+  is clean but makes a fresh login/audit event each time.
+
+### FTP — passive mode + `MLSD`
+`ftplib` defaults to passive mode (`PASV`/`EPSV`) and smbex prefers `MLSD` for
+listings (falling back to `LIST`). The classic `ftp` command defaults to *active* mode
+and uses `LIST`/`NLST`. Both smbex choices match modern clients (`lftp`); if your
+baseline is the traditional `ftp` client, expect a different data-connection direction
+(firewall-visible) and `MLSD` where you would see `LIST`. `TYPE I` is also re-sent
+before every `RETR` (extra but valid — MLSD/LIST leave the session in ASCII mode).
+
+### Reconnect produces additional login/auth events
+By design, a dropped link plus `r` (or `--auto-reconnect`) performs a **fresh login**,
+so one smbex "session" can show multiple logins from the same source — unlike a single
+long-lived client session. `--auto-reconnect` makes these re-logins silent. Relevant
+for audit correlation.
+
+### scp support (evaluated, not implemented)
+Adding scp as a peer protocol is technically possible (paramiko `exec_command` running
+`scp -f`) but fits smbex's model **poorly**, so it is intentionally **not** built:
+
+- **No listing or stat.** The scp protocol only transfers files/trees; browsing would
+  require shelling out to remote `ls`/`find` over an exec channel — i.e. **running
+  commands** on the host (a larger footprint than SFTP's read-only file ops, and
+  shell/PATH-dependent). The ranger UI is built on `list()`/`stat()`, which scp lacks.
+- **No seek/resume.** scp streams a whole file start-to-finish, so resumable downloads,
+  the lazy preview, and the windowed viewer (all of which seek) cannot work.
+- **Shrinking need.** OpenSSH 9.0 (2022) deprecated the scp protocol and made the `scp`
+  command use SFTP under the hood, so on modern hosts "scp" already *is* sftp.
+
+Where it would earn its place: appliances/embedded gear (e.g. **dropbear** without
+sftp-server) or hardened boxes that permit scp but not the sftp subsystem. If such
+targets exist in your fleet, the honest shape is **not** a browsing peer backend but a
+restricted **download-only** mode (transfer via scp, browse via remote `ls`), with no
+resume/preview. Recommendation: don't build it speculatively — revisit only if you can
+enumerate real sftp-disabled hosts.
