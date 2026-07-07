@@ -86,6 +86,8 @@ class SmbexApp(App):
         Binding("escape", "escape_view", "Back", show=False),
         Binding("d", "download", "Download"),
         Binding("a", "download_all", "Grab all"),
+        Binding("y", "copy_name", "Copy name"),
+        Binding("Y", "copy_path", "Copy path"),
         Binding("w", "toggle_downloads", "Tasks"),
         Binding("p", "toggle_preload", "Preload"),
         Binding("t", "toggle_translate", "Translate"),
@@ -388,6 +390,37 @@ class SmbexApp(App):
     def _show_downloads(self) -> None:
         self.query_one("#downloads", DownloadPanel).remove_class("hidden")
         self._refresh_downloads()
+
+    # --- clipboard ------------------------------------------------------------
+    # The listing panes render as a rich Table for column alignment, which Textual's
+    # native text selection can't extract from (it only reads Text/Content visuals).
+    # These keys copy the selected entry directly instead — full, untruncated, and
+    # unaffected by on-screen ellipsis. In the content viewer, drag-select + ctrl+c
+    # already works (that pane is a Text), so 'y'/'Y' just copy the viewed file here.
+    def action_copy_name(self) -> None:
+        self._copy_selection(full_path=False, label="name")
+
+    def action_copy_path(self) -> None:
+        self._copy_selection(full_path=True, label="path")
+
+    def _copy_selection(self, *, full_path: bool, label: str) -> None:
+        sel = self.browser.selected
+        if sel is None:
+            self._status_note("nothing selected to copy")
+            return
+        text = self._copy_text_for(sel, full_path=full_path)
+        self.copy_to_clipboard(text)
+        self._status_note(f"copied {label}: {text}")
+
+    def _copy_text_for(self, entry, *, full_path: bool) -> str:
+        """The clipboard string for ``entry``: bare name, or the full remote path
+        (as shown in the status bar). When translation is active, append the English
+        rendering so the copy matches what's on screen."""
+        base = "/" + self.browser.child_path(entry.name) if full_path else entry.name
+        translated = self._name_translation(entry)
+        if translated and translated != entry.name:
+            return f"{base} → {translated}"
+        return base
 
     # --- rendering ------------------------------------------------------------
     async def _refresh(self) -> None:
