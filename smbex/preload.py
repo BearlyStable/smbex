@@ -25,6 +25,7 @@ browsed one.
 from __future__ import annotations
 
 import asyncio
+from typing import Callable
 
 from smbex.backend.base import DirEntry
 from smbex.cache import ListingCache
@@ -55,6 +56,10 @@ class Preloader:
         self.priority = int(priority)
         self._tasks: set[asyncio.Task] = set()
         self._inflight: set[str] = set()
+        #: Called (on the event loop) with a path just warmed into the cache, so a
+        #: view can repaint its "listing cached" marker live instead of only on the
+        #: next navigation. Set by the UI; left None for headless/test use.
+        self.on_warm: Callable[[str], None] | None = None
 
     def neighbors(
         self, path: str, entries: list[DirEntry], selected: DirEntry | None
@@ -112,6 +117,8 @@ class Preloader:
             entries = await self.gateway.list(path, priority=self.priority)
             if path not in self.cache:  # a real browse may have filled it meanwhile
                 self.cache.put(path, _sort(entries))
+                if self.on_warm is not None:
+                    self.on_warm(path)  # let the UI repaint the "cached" marker now
         except Exception:
             pass  # unreadable on preload: leave uncached; a real browse will surface it
         finally:

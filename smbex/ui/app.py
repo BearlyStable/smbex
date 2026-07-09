@@ -149,6 +149,7 @@ class SmbexApp(App):
         self.query_one("#parent", Column).set_class(not self._show_parent, "hidden")
         self.query_one("#preview", Column).set_class(not self._show_preview, "hidden")
         self._gateway.on_status = self._on_conn_status  # surface reconnect state
+        self.browser.preloader.on_warm = self._on_preload_warm  # live cached-marker
         await self._gateway.start()
         self._downloads.on_change = self._on_downloads_change
         self._downloads.start()
@@ -667,6 +668,23 @@ class SmbexApp(App):
                 and self._preview_state() != self._preview_key
             ):
                 self._render_preview(None)
+        except Exception:
+            pass  # widgets may be gone during teardown
+
+    def _on_preload_warm(self, path: str) -> None:
+        """Preloader filled the cache for ``path`` — repaint the '·' marker live.
+
+        Markers live only on the current column, so a warm matters only when ``path``
+        is a direct child of the current directory (a visible sibling/selection); a
+        parent-directory warm changes nothing on screen. The content viewer owns the
+        columns while open, so skip then.
+        """
+        try:
+            if self._view is not None:
+                return
+            parent = path.rsplit("/", 1)[0] if "/" in path else ""
+            if parent == self.browser.path:
+                self._render_current()
         except Exception:
             pass  # widgets may be gone during teardown
 

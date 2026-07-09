@@ -8,6 +8,7 @@ from __future__ import annotations
 from smbex.backend.fake_backend import FakeBackend
 from smbex.browser import Browser
 from smbex.gateway import Gateway, Priority
+from smbex.ui.columns import Column
 
 TREE = {
     "share": {
@@ -135,4 +136,19 @@ async def test_toggle_p_warms_current_neighbourhood(make_app):
         await app.browser.preloader.wait()
         assert "share/pics" in app.browser.cache
         assert "share/music" in app.browser.cache
+        await pilot.press("q")
+
+
+async def test_preload_repaints_cached_marker_live(make_app):
+    """A background preload of a visible sibling shows its '·' without navigating."""
+    app = make_app({"share": dict(TREE["share"])}, preload=True)
+    async with app.run_test() as pilot:
+        await pilot.press("l")  # enter "share"; cursor on first entry "docs"
+        current = app.query_one("#current", Column)
+        # Siblings below the cursor aren't cached by _refresh (only parent/preview are);
+        # the preloader warms them in the background.
+        await app.browser.preloader.wait()
+        assert "share/music" in app.browser.cache
+        # The gutter now shows a dot for a warmed sibling — repainted live, no nav.
+        assert current.rendered_text.count("·") >= 2
         await pilot.press("q")
