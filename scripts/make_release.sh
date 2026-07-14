@@ -37,7 +37,7 @@ echo "   wrote $DIST/smbex.pyz ($(du -h "$DIST/smbex.pyz" | cut -f1))"
 root="smbex-$VER"
 tstage="$(mktemp -d)"
 mkdir -p "$tstage/$root"
-cp -r smbex scripts README.md CLAUDE.md pyproject.toml "$tstage/$root/"
+cp -r smbex scripts README.md CLAUDE.md LICENSE pyproject.toml "$tstage/$root/"
 find "$tstage/$root" -name __pycache__ -type d -prune -exec rm -rf {} +
 "$PY" -c 'from smbex.cli import QUICKSTART; print(QUICKSTART)' > "$tstage/$root/QUICKSTART.txt"
 tar -czf "$DIST/$root.tar.gz" -C "$tstage" "$root"
