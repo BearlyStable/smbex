@@ -272,3 +272,7 @@ targets exist in your fleet, the honest shape is **not** a browsing peer backend
 restricted **download-only** mode (transfer via scp, browse via remote `ls`), with no
 resume/preview. Recommendation: don't build it speculatively — revisit only if you can
 enumerate real sftp-disabled hosts.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
