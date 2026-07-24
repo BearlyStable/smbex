@@ -22,6 +22,7 @@ Connect (SMB / SSH / FTP), then press '?' in-app for all keys:
   smbex 'DOMAIN/user:pass@host'      SMB (impacket-style; -H hash, -k kerberos)
   smbex 'ssh://user@host:22/path'    SSH / SFTP
   smbex 'ftp://user@host'            FTP (ftps:// for TLS; no user = anonymous)
+  smbex --mux                        ride an existing SSH ControlMaster socket (picker)
   h/j/k/l move, l/Enter open, d download, [ ] hide columns, q quit.
 
 Config file (your defaults; command-line flags still override it):
@@ -80,6 +81,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--ignore-host-keys",
         action="store_true",
         help="never check or store SSH host keys",
+    )
+    ssh.add_argument(
+        "--mux",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="PATH",
+        help="ride an existing OpenSSH ControlMaster socket instead of authenticating: "
+        "with no PATH, scan the default control-socket dirs (~/.ssh, …) and show a "
+        "picker; PATH may be a directory to scan, or a socket file to ride directly. "
+        "Reuses the already-authenticated session — no new login (needs the ssh client).",
     )
 
     ui = parser.add_argument_group("UI")
@@ -192,6 +204,62 @@ def _connect_ftp(ftp):
         raise SystemExit(f"connection failed: {exc}")
 
 
+def _run_mux(args, translator) -> int:
+    """Ride an existing SSH ControlMaster socket. ``args.mux`` is "" (scan the default
+    dirs and show a picker), a directory (scan it), or a socket file (ride directly)."""
+    import shutil
+
+    from smbex.mux import MuxBackend, discover_masters, resolve_socket_or_dirs
+
+    if shutil.which("ssh") is None:
+        raise SystemExit("--mux needs the OpenSSH 'ssh' client binary, which was not found")
+    try:
+        socket_path, dirs = resolve_socket_or_dirs(args.mux)
+    except ValueError as exc:
+        raise SystemExit(f"--mux: {exc}")
+
+    if socket_path is None:  # discover, then pick
+        masters = discover_masters(dirs)
+        if not masters:
+            scanned = ", ".join(str(d) for d in dirs)
+            raise SystemExit(
+                f"no live SSH master sockets found in: {scanned}\n"
+                "Enable OpenSSH multiplexing first (in ~/.ssh/config):\n"
+                "    ControlMaster auto\n"
+                "    ControlPath ~/.ssh/cm-%r@%h:%p\n"
+                "    ControlPersist 10m\n"
+                "then connect once (e.g. `ssh user@host`) to open the socket — or pass "
+                "a socket/dir explicitly: --mux /path/to/socket"
+            )
+        from smbex.ui.mux_picker import MuxPicker
+
+        socket_path = MuxPicker(masters).run()
+        if not socket_path:  # cancelled
+            return 0
+
+    try:
+        backend = MuxBackend.connect_socket(socket_path)
+    except Exception as exc:  # noqa: BLE001 - report any connection failure cleanly
+        raise SystemExit(f"connection failed: {exc}")
+
+    from smbex.gateway import Gateway
+    from smbex.ui.app import SmbexApp
+
+    SmbexApp(
+        Gateway(backend, auto_reconnect=args.auto_reconnect),
+        start_path=backend.start_rel,
+        preload=args.preload,
+        label=f"mux:{backend.label}",
+        download_root=Path(args.download_dir) / _safe(backend.host or "mux"),
+        translator=translator,
+        sort=args.sort,
+        theme=args.theme,
+        show_parent=args.parent,
+        show_preview=args.preview,
+    ).run()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     from smbex.config import load_config, write_sample_config
 
@@ -221,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Installed to {dest}.  Launch with:  --translate {code}")
         return 0
 
-    if not args.target:
+    if args.mux is None and not args.target:
         parser.error("a target is required, e.g. 'DOMAIN/user:pass@host' or 'ssh://user@host'")
 
     translator = None
@@ -238,6 +306,9 @@ def main(argv: list[str] | None = None) -> int:
                 f"python -m smbex --install-lang {args.translate}",
                 file=sys.stderr,
             )
+
+    if args.mux is not None:  # ride an existing SSH ControlMaster socket
+        return _run_mux(args, translator)
 
     from smbex.auth import Proto, make_conn_spec
 

@@ -11,7 +11,8 @@ a slow connection. Feature list (all implemented — phases 0–9 done):
   - **SMB** with the same login surface as `impacket-smbclient` (password, NTLM
     hash / pass-the-hash, Kerberos ccache, AES key, null session, `-dc-ip`,
     `-target-ip`, port 139/445).
-  - **SSH/SCP** via SFTP (connect, browse, download). Auth: password, key file, agent.
+  - **SSH/SCP** via SFTP (connect, browse, download). Auth: password, key file, agent,
+    or **ride an existing OpenSSH ControlMaster socket** (`--mux`; no re-login).
   - **FTP / FTPS** via stdlib `ftplib` (`ftp://` / `ftps://`; anonymous or user/pass).
 - **Ranger-style navigation** (Miller columns, `h/j/k/l`, `gg`/`G`, previews).
 - **In-session listing cache** so revisiting a folder is instant. **Session-only —
@@ -127,6 +128,38 @@ a slow connection. Feature list (all implemented — phases 0–9 done):
 > pyftpdlib server, `tests/test_backend_ftp_integration.py` (list/read/stat, partial
 > read, recursive download, drop→manual-reconnect, TUI browse) — **@integration; skips
 > if pyftpdlib is absent** (test-only dep; `python3-pyftpdlib` on apt).
+
+> Mux note (ride an existing SSH ControlMaster socket — `--mux`): `smbex/mux.py`
+> reuses an already-authenticated OpenSSH connection instead of logging in. A control
+> socket speaks OpenSSH's private multiplexing protocol (`mux.c`), **not** SSH2, so
+> paramiko can't use it directly; instead we drive the system `ssh` client: `ssh -s
+> sftp` over the ControlPath opens the SFTP subsystem on a multiplexed session, and
+> paramiko's `SFTPClient` speaks SFTP to that subprocess over its stdio pipes
+> (`PipeChannel` adapter — send/recv/get_name/close; **close via the Popen file
+> objects, never `os.close` the fds**, or a later process's recycled fds get
+> clobbered → EBADF). So `MuxBackend` subclasses `SshBackend` and reuses its whole
+> list/stat/read surface unchanged. **Holds no credentials — only the socket path:**
+> every slave is gated on `ssh -O check` (the master must be alive) and started with
+> no key + `BatchMode=yes` + `-F /dev/null`, so OpenSSH's direct-connect fallback
+> **can't** silently open a *new* login (verified: without the gate it does — the #1
+> footgun). Reconnect (`r`) just re-checks + re-spawns; it heals **iff** a live master
+> is (re-)established at the *same* socket path (there are no creds to rebuild one).
+> `--mux` with no arg scans conventional control dirs (`~/.ssh`, `~/.ssh/sockets`,
+> `~/.ssh/controlmasters`, `~/.ansible/cp` — deliberately **not** `$XDG_RUNTIME_DIR`,
+> too many non-mux sockets), keeps sockets we own, and probes each with `-O check`
+> **concurrently** with a short timeout (a non-mux socket makes `-O check` *block* to
+> the timeout), then **always shows a picker** (`smbex/ui/mux_picker.py`); `--mux DIR`
+> scans DIR; `--mux SOCKET` connects directly (no picker). Picker labels are
+> best-effort: master pid from `-O check` → `/proc/<pid>/cmdline` (Linux) for the real
+> destination → a `%r@%h:%p` filename → the socket path. **Runtime deps: none new**
+> (stdlib `subprocess` + existing paramiko); needs the system `ssh` **client** (Linux;
+> `/proc` for labels). Tested: `tests/test_mux.py` (offline — argv/label parsing,
+> resolve, discovery with a faked `master_check`, `PipeChannel` incl. the
+> fd-double-close regression), `tests/test_ui_mux_picker.py` (picker Pilot), and
+> `tests/test_backend_mux_integration.py` (**@integration** — a real `ssh` master
+> multiplexing in front of the in-process paramiko SFTP server, **no sshd**: list/read,
+> ranged `open_file`, kill-master→manual-reconnect-same-path, TUI browse, CLI
+> `_run_mux`; skips if the ssh client binaries are absent).
 
 > Theming note: `--theme NAME` / config `theme` set the startup theme (dark default);
 > `T` cycles `_THEME_CYCLE` (textual-dark/-light/nord/gruvbox, filtered to those
@@ -309,9 +342,11 @@ Two load-bearing seams keep this testable and responsive:
 1. **Backend abstraction** (`smbex/backend/base.py`) — a protocol with
    `roots() / list() / stat() / open_read() / open_file()` over a single POSIX path.
    Implementations: `impacket_backend.py` (SMB; first path component = share),
-   `ssh_backend.py` (paramiko/SFTP), `ftp_backend.py` (stdlib ftplib; FTP/FTPS), and
-   `fake_backend.py` (in-memory tree for fast offline tests). Everything above the
-   backend is protocol-agnostic.
+   `ssh_backend.py` (paramiko/SFTP), `ftp_backend.py` (stdlib ftplib; FTP/FTPS),
+   `fake_backend.py` (in-memory tree for fast offline tests), and `mux.py`'s
+   `MuxBackend` (subclasses `ssh_backend` to ride an existing OpenSSH ControlMaster
+   socket — SFTP over the system `ssh` client instead of a paramiko connection).
+   Everything above the backend is protocol-agnostic.
 2. **Serializing gateway** (`smbex/gateway.py`) — owns the connection and an asyncio
    **priority** queue. One worker pops the highest-priority job and runs the blocking
    backend call via `asyncio.to_thread` behind a lock (a single impacket/paramiko
@@ -339,11 +374,13 @@ smbex/
   download.py            ✓ background DownloadManager (resume/skip, mirror, throttled; one handle/file)
   preload.py             ✓ surrounding-folder preloader (PRELOAD-priority, toggle-gated)
   translate.py           ✓ local filename translation (CTranslate2 + SentencePiece; lazy)
+  mux.py                 ✓ ride an existing SSH ControlMaster socket (--mux): PipeChannel + discovery + MuxBackend
   ui/
     app.py               ✓ Textual ranger UI (parent|current|preview, dark default)
     columns.py           ✓ Miller-column widget
     downloads.py         ✓ download/task panel (progress bars)
     help.py              ✓ '?' help overlay (ModalScreen, keybindings by group)
+    mux_picker.py        ✓ '--mux' control-socket picker (pre-launch selection app)
 tests/                   pytest; FakeBackend + live SMB server fixtures
 ```
 
