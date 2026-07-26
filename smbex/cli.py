@@ -18,26 +18,35 @@ def _safe(host: str) -> str:
 QUICKSTART = """\
 quickstart
 ----------
-Connect (SMB / SSH / FTP), then press '?' in-app for all keys:
-  smbex 'DOMAIN/user:pass@host'      SMB (impacket-style; -H hash, -k kerberos)
-  smbex 'ssh://user@host:22/path'    SSH / SFTP
-  smbex 'ftp://user@host'            FTP (ftps:// for TLS; no user = anonymous)
-  smbex --mux                        ride an existing SSH ControlMaster socket (picker)
+Connect (SMB / SSH / FTP / mux), then press '?' in-app for all keys:
+  smbex 'DOMAIN/user:pass@host'         SMB (impacket-style: -H hash, -k kerberos,
+                                            --no-pass null session, --port 139)
+  smbex 'ssh://user@host:22/path'       SSH / SFTP (-i KEY, else agent / password)
+  smbex 'ftp://user@host'               FTP (ftps:// for TLS; no user = anonymous)
+  smbex --mux                           ride an existing SSH ControlMaster socket,
+                                            no re-login (needs the system ssh client):
+      smbex --mux                         scan ~/.ssh etc. and pick from a list
+      smbex --mux DIR                     scan a directory you choose
+      smbex --mux /path/to/master.sock    ride that socket directly
   h/j/k/l move, l/Enter open, d download, [ ] hide columns, q quit.
 
 Config file (your defaults; command-line flags still override it):
-  smbex --write-config               writes ~/.config/smbex/config.ini, then edit it
+  smbex --write-config                  writes ~/.config/smbex/config.ini, then edit it
   keys: preload, auto_reconnect, sort, theme, parent, preview, translate, download_dir
 
 Offline filename translation (optional; runs entirely on this machine):
   1. engine (once):   pip install ctranslate2 sentencepiece
-  2. language model:  smbex --install-lang ja
+  2. language model:  smbex --install-lang ja      (code is 'ja', not 'jp')
        fetches one .argosmodel from the Argos package index:
        https://raw.githubusercontent.com/argosopentech/argospm-index/main/index.json
-       air-gapped? download the .argosmodel yourself, then:
+  3. use it:          smbex --translate ja 'user@host'      (toggle in-app with 't')
+     Nothing is ever sent off the machine.
+
+  Add a language by hand (no app needed / air-gapped) — fetch the one .argosmodel
+  and install it locally:
+       curl -LO https://argos-net.com/v1/translate-ja_en-1_1.argosmodel
        smbex --install-lang ja --model-file translate-ja_en-1_1.argosmodel
-  3. use it:          smbex --translate ja 'user@host'     (toggle in-app with 't')
-     Note the code is 'ja' (not 'jp'). Nothing is ever sent off the machine.
+     (other languages: same host, filename translate-<from>_en-<ver>.argosmodel)
 """
 
 

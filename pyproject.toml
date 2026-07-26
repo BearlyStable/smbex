@@ -4,13 +4,28 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smbex"
-version = "0.1.0"
-description = "Terminal explorer for remote hosts over SMB and SSH/SFTP, with ranger-style navigation."
+dynamic = ["version"]
+description = "Terminal explorer for remote hosts over SMB, SSH/SFTP and FTP, with ranger-style navigation."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Philipp Herkert" }]
+keywords = ["smb", "ssh", "sftp", "ftp", "tui", "file-manager", "ranger", "impacket", "pentest"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Information Technology",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Networking",
+    "Topic :: Utilities",
+]
 dependencies = [
     "impacket>=0.11",
     "paramiko>=3.0",
@@ -22,6 +37,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pyftpdlib>=1.5",  # in-process FTP server for the FTP integration tests only
+    "build>=1.0",      # `python -m build` -> dist/ wheel + sdist for PyPI / pipx
 ]
 # Offline-translation runtime: CTranslate2 (inference) + SentencePiece (tokeniser)
 # drive an Argos-format model directly (~65 MB) — deliberately NOT `argostranslate`,
@@ -35,8 +51,16 @@ translate = [
 [project.scripts]
 smbex = "smbex.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/BearlyStable/smbex"
+Repository = "https://github.com/BearlyStable/smbex"
+Issues = "https://github.com/BearlyStable/smbex/issues"
+
 [tool.setuptools.packages.find]
 include = ["smbex*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "smbex.__version__" }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
