@@ -10,6 +10,24 @@ filename translation.
 
 ## Install
 
+### pipx (PyPI)
+
+Install the `smbex` command into its own isolated environment (needs Python 3.10+):
+
+```sh
+pipx install smbex
+# ...with offline filename translation (CTranslate2 + SentencePiece, ~65 MB):
+pipx install "smbex[translate]"
+
+smbex --help
+```
+
+Installed this way, run it as `smbex …` (the examples below use `python3 -m smbex …`;
+the two are interchangeable). Two things are **not** Python packages and so aren't
+pulled in automatically: the `--mux` feature needs the system OpenSSH `ssh` client,
+and translation needs a one-time language-model download (`smbex --install-lang
+<lang>`; see below).
+
 ### Kali Linux (apt only — no pip)
 
 Every runtime/test dependency except the translation engine is packaged for Kali:
@@ -62,6 +80,10 @@ python3 -m smbex -k --dc-ip 10.0.0.1 'DOMAIN/user@host.domain'    # Kerberos (cc
 # SSH/SFTP (host keys auto-accepted by default; --strict-host-keys to verify):
 python3 -m smbex 'ssh://user@host'
 python3 -m smbex -i ~/.ssh/id_ed25519 'ssh://user@host:2222/var/log'
+
+# SSH via an existing OpenSSH ControlMaster socket — no re-login (needs the ssh client):
+python3 -m smbex --mux                       # pick from sockets found in ~/.ssh etc.
+python3 -m smbex --mux /path/to/master.sock  # ride a specific socket directly
 
 # FTP / FTPS (no user -> anonymous; ftps:// for TLS):
 python3 -m smbex 'ftp://user@host'
