@@ -43,8 +43,17 @@ from smbex.backend.ssh_backend import SshBackend
 _DUMMY_HOST = "smbex-mux"
 
 # ssh options every mux invocation shares: ignore the user's ssh_config (so a stray
-# Host block can't redirect us), never prompt, and don't try to become a master.
-_SSH_COMMON = ["-F", "/dev/null", "-o", "BatchMode=yes", "-o", "ControlMaster=no"]
+# Host block can't redirect us), never prompt, don't try to become a master, and
+# ProxyCommand=false so that if we ever reach OpenSSH's direct-connect fallback (no
+# live master) it aborts *locally* instead of dialing the remote — no new login, not
+# even a DNS lookup, leaves the box. Inert while a master is alive: multiplexing skips
+# connection setup, so ProxyCommand is never consulted.
+_SSH_COMMON = [
+    "-F", "/dev/null",
+    "-o", "BatchMode=yes",
+    "-o", "ControlMaster=no",
+    "-o", "ProxyCommand=false",
+]
 
 
 # --- pipe -> paramiko "channel" adapter -------------------------------------

@@ -58,6 +58,52 @@ def mux_master(sftp_server, tmp_path):
         _exit_master(str(sock))
 
 
+def test_slave_never_dials_out_when_master_absent():
+    """The ProxyCommand=false hardening: with no live master, a slave built from the
+    real mux options must fail *locally* — never opening a TCP connection to the
+    remote (here a canary listener standing in for the target)."""
+    import socket
+    import threading
+
+    from smbex import mux
+
+    if shutil.which("ssh") is None:
+        pytest.skip("no ssh client binary")
+
+    canary = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    canary.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    canary.bind(("127.0.0.1", 0))
+    canary.listen(1)
+    canary.settimeout(3.0)
+    port = canary.getsockname()[1]
+    got: list = []
+
+    def accept_one():
+        try:
+            conn, _ = canary.accept()
+            got.append(conn)
+            conn.close()
+        except OSError:
+            pass
+
+    t = threading.Thread(target=accept_one, daemon=True)
+    t.start()
+    try:
+        # Real mux options, no live master, pointed straight at the canary: the
+        # ControlMaster=no fallback must be intercepted by ProxyCommand=false.
+        r = subprocess.run(
+            ["ssh", *mux._SSH_COMMON, "-o", "ControlPath=/nonexistent/smbex-mux.sock",
+             "-p", str(port), "tester@127.0.0.1", "-s", "sftp"],
+            capture_output=True, timeout=15,
+        )
+    finally:
+        t.join(timeout=4)
+        canary.close()
+
+    assert r.returncode != 0    # fell through to the fallback, which aborted locally
+    assert got == []            # ...without ever connecting to the remote
+
+
 def test_mux_backend_lists_and_reads(mux_master):
     from smbex.mux import MuxBackend
 
