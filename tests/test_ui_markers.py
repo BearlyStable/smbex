@@ -11,11 +11,12 @@ from smbex.download import DownloadItem
 from smbex.ui.columns import Column
 
 
-async def test_cached_folder_gets_dot_marker(make_app):
+async def test_cached_folder_gets_dot_marker(make_app, settle):
     app = make_app()
     async with app.run_test() as pilot:
         await pilot.press("j")  # select "share"
-        await pilot.press("l")  # enter it; _refresh previews "docs" -> caches share/docs
+        await pilot.press("l")  # enter it; the deferred preview caches share/docs
+        await settle(app, pilot)
         current = app.query_one("#current", Column)
         assert app.browser.child_path("docs") in app.browser.cache
         assert "·" in current.rendered_text  # cached dir shows the cache glyph

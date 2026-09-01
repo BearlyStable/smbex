@@ -93,6 +93,23 @@ def make_app():
     return _make
 
 
+@pytest.fixture
+def settle():
+    """Await an app's deferred parent/preview fetch, then let the UI repaint.
+
+    Cursor moves render from memory and schedule the side-column listings in the
+    background (SmbexApp._schedule_side_refresh), so a test that asserts on those
+    columns has to wait for them the way a user does.
+    """
+
+    async def _settle(app, pilot):
+        await pilot.pause()
+        await app.wait_for_side_refresh()
+        await pilot.pause()
+
+    return _settle
+
+
 class FakeTranslator:
     """Deterministic stand-in satisfying smbex.translate.Translator, offline.
 

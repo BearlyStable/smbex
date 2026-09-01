@@ -108,6 +108,27 @@ class Browser:
             self.path, self.entries, self.selected, enabled=self.preload_enabled
         )
 
+    # --- cache-only views (never hit the wire) --------------------------------
+    # The UI renders from these on every cursor move so a keystroke is never held
+    # behind a listing fetch; whatever is missing is filled in afterwards, in the
+    # background (see SmbexApp._schedule_side_refresh).
+    @property
+    def parent_path(self) -> str | None:
+        """Path of the parent directory, or None at the roots."""
+        return None if not self.path else _parent(self.path)
+
+    @property
+    def preview_path(self) -> str | None:
+        """Path the preview column would list, or None when a file is selected."""
+        sel = self.selected
+        return _join(self.path, sel.name) if sel is not None and sel.is_dir else None
+
+    def peek(self, path: str) -> list[DirEntry] | None:
+        """Already-cached listing of ``path`` in view order, else None. No backend
+        call and no cache accounting — a miss is answered by the real fetch later."""
+        entries = self.cache.peek(path)
+        return None if entries is None else self._sorted(entries)
+
     @property
     def selected(self) -> DirEntry | None:
         return self.entries[self.cursor] if 0 <= self.cursor < len(self.entries) else None

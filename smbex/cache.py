@@ -20,6 +20,14 @@ class ListingCache(Generic[V]):
         self.hits = 0
         self.misses = 0
 
+    def peek(self, key: str) -> V | None:
+        """Look up without touching the LRU order or the hit/miss counters.
+
+        For speculative lookups ("can I render this right now?") that must not be
+        counted as a browse, and whose miss is followed by a real ``get``.
+        """
+        return self._data.get(key)
+
     def get(self, key: str) -> V | None:
         if key in self._data:
             self._data.move_to_end(key)

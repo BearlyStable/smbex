@@ -68,6 +68,37 @@ class Column(Static):
     #: The entries currently displayed, and the rendered plain text (for tests).
     shown: list[DirEntry] = []
     rendered_text: str = ""
+    #: First row of the last render — the view scrolls itself to follow the cursor.
+    top: int = 0
+    #: Rows kept between the cursor and the edge while scrolling (ranger's scrolloff).
+    SCROLLOFF = 2
+
+    def window(self, count: int, cursor: int | None) -> tuple[int, int]:
+        """The slice of ``count`` rows to render: only what fits on screen, scrolled
+        so ``cursor`` stays visible.
+
+        Rendering a whole listing costs time proportional to its length, which on a
+        big folder makes every keystroke redraw thousands of unseen rows; windowing
+        keeps a cursor move O(screen). Falls back to "everything" before the first
+        layout, when the height isn't known yet.
+        """
+        height = self.size.height
+        if height <= 0 or count <= height:
+            self.top = 0
+            return 0, count
+        pad = min(self.SCROLLOFF, max(0, (height - 1) // 2))
+        top = min(self.top, count - height)
+        if cursor is not None:
+            top = min(top, max(0, cursor - pad))  # cursor above the window: scroll up
+            top = max(top, min(cursor + pad, count - 1) - height + 1)  # ... or below
+        self.top = max(0, min(top, count - height))
+        return self.top, self.top + height
+
+    def show_loading(self) -> None:
+        """Placeholder while a listing is being fetched (never a stale one)."""
+        self.shown = []
+        self.rendered_text = ""
+        self.update(Text("…", style="dim italic"))
 
     def show(
         self,
@@ -98,8 +129,9 @@ class Column(Static):
         table.add_column(justify="right", no_wrap=True)  # size
         table.add_column(justify="right", no_wrap=True)  # age
 
+        start, stop = self.window(len(entries), cursor)
         lines: list[str] = []
-        for i, entry in enumerate(entries):
+        for i, entry in enumerate(entries[start:stop], start):
             glyph = " "
             cells = []
             if markers is not None:

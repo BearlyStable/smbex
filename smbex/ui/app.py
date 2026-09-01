@@ -48,13 +48,20 @@ class _FileViewState:
 class SmbexApp(App):
     TITLE = "smbex"
 
+    #: Seconds to wait before fetching the parent/preview listings after the cursor
+    #: moves. A held-down j/k walks over many entries; without this, each stop would
+    #: queue its own listing on the wire and the last one would land seconds late.
+    #: Only the *fetch* is delayed — the cursor and the current column never wait.
+    SIDE_REFRESH_DELAY = 0.12
+
     CSS = """
     #columns { height: 1fr; }
     Column {
         width: 1fr;
+        height: 100%;      /* fill the row: Column.window() sizes its render to this */
         border: round $panel;
         padding: 0 1;
-        overflow-y: auto;
+        overflow: hidden hidden;
     }
     #current { border: round $accent; }
     #downloads {
@@ -128,6 +135,9 @@ class SmbexApp(App):
         self.translate_enabled = translator is not None
         self._conn_state = "connected"  # updated by the gateway on link changes
         self._preview_key = None  # what the preview last rendered (to re-render on change)
+        self._side_seq = 0  # scheduled deferred side-column refreshes ...
+        self._side_ack = 0  # ... and finished ones (equal == nothing pending)
+        self._dl_paint = (0.0, ())  # last download repaint: (time, status signature)
         self._view: _FileViewState | None = None  # set while a file's content is open
 
     @property
@@ -161,6 +171,7 @@ class SmbexApp(App):
         await self._refresh()
 
     async def on_unmount(self) -> None:
+        self.workers.cancel_group(self, "side")  # deferred column fetches
         await self._downloads.stop()  # stop before the gateway it depends on
         await self.browser.preloader.stop()  # cancel prefetches before the gateway
         await self._gateway.stop()
@@ -326,26 +337,30 @@ class SmbexApp(App):
         """
         if not entries:
             return None
-        items = self._downloads.items
         cache = self.browser.cache
+        base = self.browser.path
+        prefix = f"{base}/" if base else ""
+        # Bucket the download items by the current dir's child they live under, in one
+        # pass — a per-entry scan would be O(entries x downloads) on every repaint.
+        by_child: dict[str, set[str]] = {}
+        for item in self._downloads.items:
+            if not item.remote_path.startswith(prefix):
+                continue
+            rest = item.remote_path[len(prefix):]
+            if rest:
+                by_child.setdefault(rest.split("/", 1)[0], set()).add(item.status)
         markers: list[str] = []
         for entry in entries:
-            path = self.browser.child_path(entry.name)
-            if entry.is_dir:
-                prefix = path + "/"
-                rel = [it for it in items if it.remote_path == path or it.remote_path.startswith(prefix)]
-            else:
-                rel = [it for it in items if it.remote_path == path]
+            statuses = by_child.get(entry.name)
             glyph = " "
-            if rel:
-                statuses = {it.status for it in rel}
+            if statuses:
                 if statuses & {"queued", "running"}:
                     glyph = "↓"
                 elif "error" in statuses:
                     glyph = "✗"
                 elif statuses <= {"done", "skipped"}:
                     glyph = "✓"
-            if glyph == " " and entry.is_dir and path in cache:
+            if glyph == " " and entry.is_dir and self.browser.child_path(entry.name) in cache:
                 glyph = "·"
             markers.append(glyph)
         return markers
@@ -424,34 +439,103 @@ class SmbexApp(App):
         return base
 
     # --- rendering ------------------------------------------------------------
+    # Repainting is split in two so a keystroke never waits on the network:
+    #   _render_now()            everything already in memory/cache — instant;
+    #   _schedule_side_refresh() fetches only what's missing, later, in a worker.
+    # A dropped link therefore can't blank the view you're on, and holding down 'j'
+    # over a hundred folders costs one listing fetch (of where you stopped), not a
+    # hundred queued behind each other on a slow link.
     async def _refresh(self) -> None:
-        browser = self.browser
-        # The parent/preview columns fetch (cache-backed); tolerate a dropped link and
-        # just leave them empty. The current column renders from in-memory entries (no
-        # fetch), so a drop never blanks the view you're on — and it renders *after*
-        # the preview fetch so its cache marker reflects the just-warmed child. Hidden
-        # columns skip their fetch entirely (saves a round-trip on a slow link).
-        parent: list = []
-        if self._show_parent:
-            try:
-                parent = await browser.parent_entries()
-            except Exception:
-                parent = []
-        preview = None
-        if self._show_preview:
-            try:
-                preview = await browser.preview_entries()
-            except Exception:
-                preview = None
+        self._render_now()
+        self._schedule_side_refresh()
 
+    def _render_now(self) -> None:
+        """Paint every column from in-memory state — no backend call, no awaiting.
+
+        A side column whose listing isn't cached yet shows a placeholder rather than
+        a stale neighbour's listing; the deferred refresh fills it in.
+        """
+        browser = self.browser
         self._render_current()
         if self._show_parent:
-            self.query_one("#parent", Column).show(
-                parent, cursor=browser.parent_cursor(parent), translations=self._entry_translations(parent)
-            )
+            parent_path = browser.parent_path
+            parent = [] if parent_path is None else browser.peek(parent_path)
+            if parent is None:
+                self.query_one("#parent", Column).show_loading()
+            else:
+                self.query_one("#parent", Column).show(
+                    parent,
+                    cursor=browser.parent_cursor(parent),
+                    translations=self._entry_translations(parent),
+                )
         if self._show_preview:
-            self._render_preview(preview)
+            preview_path = browser.preview_path
+            if preview_path is None:  # a file (or nothing) is selected
+                self._render_preview(None)
+            else:
+                preview = browser.peek(preview_path)
+                if preview is None:
+                    self.query_one("#preview", Column).show_loading()
+                    self._preview_key = self._preview_state()
+                else:
+                    self._render_preview(preview)
         self._refresh_downloads()
+
+    def _side_key(self) -> tuple:
+        """What the side columns are showing — used to drop a stale fetch."""
+        return (self.browser.path, self.browser.parent_path, self.browser.preview_path)
+
+    def _missing_side_paths(self) -> list[str]:
+        """Visible side-column listings that aren't cached yet (so need the wire)."""
+        browser = self.browser
+        wanted = []
+        if self._show_parent and browser.parent_path is not None:
+            wanted.append(browser.parent_path)
+        if self._show_preview and browser.preview_path is not None:
+            wanted.append(browser.preview_path)
+        return [path for path in wanted if browser.peek(path) is None]
+
+    def _schedule_side_refresh(self) -> None:
+        """Fetch the not-yet-cached side listings after a short settle, in a worker.
+
+        Exclusive: a newer cursor position cancels this one — during the settle that
+        means the listing is never even requested, which is what keeps a fast scroll
+        off the wire entirely.
+        """
+        if not self._missing_side_paths():
+            self._side_ack = self._side_seq  # nothing to wait for
+            return
+        self._side_seq += 1
+        self.run_worker(
+            self._side_refresh(self._side_seq, self._side_key()),
+            group="side",
+            exclusive=True,
+        )
+
+    async def _side_refresh(self, seq: int, key: tuple) -> None:
+        import asyncio
+
+        try:
+            if self.SIDE_REFRESH_DELAY:
+                await asyncio.sleep(self.SIDE_REFRESH_DELAY)  # coalesce a key repeat
+            for path in self._missing_side_paths():
+                if self._side_key() != key or self._view is not None:
+                    return  # moved on (or the file viewer took the columns)
+                try:
+                    await self.browser.listdir(path)
+                except Exception:
+                    pass  # unreadable/dropped: leave the placeholder, keep browsing
+            if self._side_key() == key and self._view is None:
+                self._render_now()
+        finally:
+            self._side_ack = max(self._side_ack, seq)
+
+    async def wait_for_side_refresh(self) -> None:
+        """Await the deferred side-column fetch (tests and scripted flows)."""
+        import asyncio
+
+        while self._side_ack < self._side_seq:
+            await asyncio.sleep(0.005)
 
     def _render_preview(self, preview) -> None:
         """Preview pane: a selected directory's listing, a downloaded file's content
@@ -652,7 +736,22 @@ class SmbexApp(App):
         self.query_one("#downloads", DownloadPanel).render_items(self._downloads.items)
         self._update_status()
 
+    def _should_paint_downloads(self) -> bool:
+        """Rate-limit progress repaints (a fast transfer reports every 256 KB), but
+        never delay a state change — that's what the gutter and the panel show."""
+        import time
+
+        signature = tuple(item.status for item in self._downloads.items)
+        now = time.monotonic()
+        last_at, last_signature = self._dl_paint
+        if signature != last_signature or now - last_at >= 0.1:
+            self._dl_paint = (now, signature)
+            return True
+        return False
+
     def _on_downloads_change(self) -> None:
+        if not self._should_paint_downloads():
+            return
         try:
             self._refresh_downloads()
             if self._view is not None:
