@@ -148,7 +148,18 @@ class DownloadManager:
                 return item
         return None
 
-    def reorder(self, item: DownloadItem, delta: int) -> bool:
+    @property
+    def can_interrupt(self) -> bool:
+        """Whether a *running* transfer can be stopped early to any benefit.
+
+        False on FTP, where the rest of the data connection has to be drained anyway
+        (see ``Backend.interruptible``): stopping would cost the same as finishing,
+        minus the file. Queued transfers can always be cancelled or reordered — those
+        never touched the wire.
+        """
+        return self.gateway is None or self.gateway.interruptible
+
+    def reorder(self, item: DownloadItem, delta: int) -> str:
         """Move a pending transfer one place up (-1) or down (+1) the queue.
 
         The worker takes the first entry still ``queued``, so swapping two pending
@@ -160,24 +171,32 @@ class DownloadManager:
         link but I want the 5 KB text file now" case, from either side: push the big
         one down, or pull the small one up.
 
-        Finished entries are skipped over rather than swapped with. Returns False if
-        the move isn't possible (nothing to swap with).
+        Finished entries are skipped over rather than swapped with. Returns what
+        happened: "moved", "preempted" (the running transfer was asked to yield),
+        "blocked" (nothing to swap with) or "uninterruptible" (this protocol can't
+        stop a running transfer to any benefit — see :attr:`can_interrupt`).
         """
         if item.status not in ("running", "queued") or not delta:
-            return False
+            return "blocked"
         pending = [i for i, it in enumerate(self.items) if it.status in ("running", "queued")]
         try:
             pos = pending.index(self.items.index(item))
         except ValueError:
-            return False
+            return "blocked"
         target = pos + (1 if delta > 0 else -1)
         if not 0 <= target < len(pending):
-            return False
+            return "blocked"
         here, there = pending[pos], pending[target]
+        if not self.can_interrupt and "running" in (item.status, self.items[there].status):
+            return "uninterruptible"  # the swap would displace a transfer we can't stop
+        already_yielding = {id(it) for it in self.items if it.control == "yield"}
         self.items[here], self.items[there] = self.items[there], self.items[here]
         self._preempt_if_displaced()
         self._notify()
-        return True
+        preempted = any(
+            it.control == "yield" and id(it) not in already_yielding for it in self.items
+        )
+        return "preempted" if preempted else "moved"
 
     def _preempt_if_displaced(self) -> None:
         """The wire belongs to the first pending entry: if the running transfer is no
@@ -193,16 +212,20 @@ class DownloadManager:
         """Cancel a transfer, or clear an entry that has already finished.
 
         Returns what happened: "cancelled" (a queued one, dropped before it starts),
-        "stopping" (a running one — it stops at the next chunk boundary) or "cleared"
-        (a finished/errored/cancelled entry, removed from the list). A cancelled
-        transfer keeps whatever it has already written, so re-grabbing it resumes
-        rather than starting over.
+        "stopping" (a running one — it stops at the next chunk boundary), "cleared"
+        (a finished/errored/cancelled entry, removed from the list) or
+        "uninterruptible" (a running one on a protocol that can't stop early — see
+        :attr:`can_interrupt`; the bytes arrive regardless, so cancelling would only
+        lose the file). A cancelled transfer keeps whatever it has already written,
+        so re-grabbing it resumes rather than starting over.
         """
         if item.status == "queued":
             item.status = "cancelled"
             self._notify()
             return "cancelled"
         if item.status == "running":
+            if not self.can_interrupt:
+                return "uninterruptible"
             item.control = "cancel"
             self._notify()
             return "stopping"

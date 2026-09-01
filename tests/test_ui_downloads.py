@@ -270,3 +270,30 @@ async def test_long_queue_windows_around_the_cursor(make_app, tmp_path):
         assert "f00.bin" not in rendered  # ... and the panel stays small
         assert rendered.count("\n") < 16
         await pilot.press("q")
+
+
+async def test_ftp_refuses_to_stop_a_running_transfer_and_says_why(make_app, tmp_path):
+    """On FTP the keys stay, but they explain instead of throwing a file away."""
+    app = make_app(dict(TREE), download_root=tmp_path)
+    app._gateway._backend.interruptible = False  # as the FTP backend declares
+    async with app.run_test() as pilot:
+        dl = app.downloads
+        running = DownloadItem("share/big.bin", Path("x"), size=100, status="running")
+        waiting = DownloadItem("share/small.txt", Path("x"), status="queued")
+        dl.items.extend([running, waiting])
+
+        await pilot.press("w")
+        assert "queued only" in _panel(app).rendered_text  # the hint says so up front
+
+        app._panel_cursor = 0  # the running one
+        await pilot.press("x")
+        assert running.status == "running" and running.control == ""
+        assert "can't be stopped early" in str(app.query_one("#status").render())
+
+        await pilot.press("J")  # ... and it can't be pushed down either
+        assert [i.remote_path for i in dl.items] == ["share/big.bin", "share/small.txt"]
+
+        app._panel_cursor = 1  # but the queued one can still be cancelled
+        await pilot.press("x")
+        assert waiting.status == "cancelled"
+        await pilot.press("q")

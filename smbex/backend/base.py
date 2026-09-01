@@ -37,6 +37,13 @@ class RemoteFile(Protocol):
 
 @runtime_checkable
 class Backend(Protocol):
+    #: Whether stopping a transfer early actually saves anything. True everywhere
+    #: except FTP, where abandoning a RETR means draining the rest of the data
+    #: connection anyway to keep the control channel in sync (see ftp_backend) — so
+    #: the bytes arrive either way and the UI refuses to interrupt rather than
+    #: throwing away a file you have already paid for.
+    interruptible: bool = True
+
     def roots(self) -> list[DirEntry]:
         """Top-level entries: SMB shares, or the SSH start directory listing."""
         ...

@@ -74,7 +74,7 @@ async def test_deprioritized_transfer_lets_the_small_one_through_then_resumes(tm
         mgr.start()
 
         await gate.wait_until_held()
-        assert mgr.reorder(big, 1) is True  # push it below the small one
+        assert mgr.reorder(big, 1) == "preempted"  # push it below the small one
         assert big.control == "yield"
         gate.release()
 
@@ -101,7 +101,7 @@ async def test_pulling_a_queued_transfer_up_preempts_the_running_one(tmp_path, c
         mgr.start()
 
         await gate.wait_until_held()
-        assert mgr.reorder(small, -1) is True  # raise the small one above it
+        assert mgr.reorder(small, -1) == "preempted"  # raise the small one above it
         assert big.control == "yield"
         gate.release()
 
@@ -118,8 +118,8 @@ async def test_a_lone_transfer_has_nothing_to_yield_to(tmp_path):
     async with Gateway(backend) as gw:
         mgr = DownloadManager(gw, tmp_path)
         only = await mgr.add_file("share/small.txt", 5)
-        assert mgr.reorder(only, 1) is False  # nothing behind it
-        assert mgr.reorder(only, -1) is False  # nothing in front either
+        assert mgr.reorder(only, 1) == "blocked"  # nothing behind it
+        assert mgr.reorder(only, -1) == "blocked"  # nothing in front either
         assert only.control == ""
         await _finish(mgr)
     assert only.status == "done"
@@ -164,3 +164,66 @@ async def _finish(mgr: DownloadManager) -> None:
     mgr.start()
     await mgr.join()
     await mgr.stop()
+
+
+# --- protocols that can't stop a transfer early (FTP) -----------------------
+
+
+class Uninterruptible(FakeBackend):
+    """A backend like FTP: abandoning a read costs what finishing it costs."""
+
+    interruptible = False
+
+
+async def test_a_running_transfer_is_not_cancellable_on_ftp(tmp_path, chunk_gate):
+    backend = Uninterruptible(TREE)
+    gate = chunk_gate(allow=1)
+    backend.read_gates["share/big.bin"] = gate
+    async with Gateway(backend) as gw:
+        mgr = DownloadManager(gw, tmp_path)
+        assert mgr.can_interrupt is False
+        big = await mgr.add_file("share/big.bin", len(BIG))
+        small = await mgr.add_file("share/small.txt", 5)
+        mgr.start()
+
+        await gate.wait_until_held()
+        # Refused: the server sends the rest either way, so stopping would only lose
+        # the file. Nothing is signalled to the transfer.
+        assert mgr.cancel(big) == "uninterruptible"
+        assert mgr.reorder(big, 1) == "uninterruptible"
+        assert mgr.reorder(small, -1) == "uninterruptible"
+        assert big.control == "" and big.status == "running"
+        assert [i.remote_path for i in mgr.items] == ["share/big.bin", "share/small.txt"]
+
+        gate.release()
+        await mgr.join()
+        await mgr.stop()
+
+    assert big.status == "done"  # it ran to completion, as it was going to anyway
+    assert (tmp_path / "share" / "big.bin").read_bytes() == BIG
+
+
+async def test_queued_transfers_can_still_be_managed_on_ftp(tmp_path, chunk_gate):
+    """Only the *running* transfer is untouchable — queued ones never hit the wire."""
+    backend = Uninterruptible(TREE)
+    gate = chunk_gate(allow=1)
+    backend.read_gates["share/big.bin"] = gate
+    async with Gateway(backend) as gw:
+        mgr = DownloadManager(gw, tmp_path)
+        big = await mgr.add_file("share/big.bin", len(BIG))
+        one = await mgr.add_file("share/small.txt", 5)
+        two = await mgr.add_file("share/other.txt", 3)
+        mgr.start()
+
+        await gate.wait_until_held()
+        assert mgr.reorder(two, -1) == "moved"  # swap the two queued ones
+        assert [i.remote_path for i in mgr.items[1:]] == ["share/other.txt", "share/small.txt"]
+        assert mgr.cancel(one) == "cancelled"  # and drop one before it starts
+
+        gate.release()
+        await mgr.join()
+        await mgr.stop()
+
+    assert one.status == "cancelled" and two.status == "done"
+    assert not (tmp_path / "share" / "small.txt").exists()
+    assert "open:share/small.txt" not in backend.events

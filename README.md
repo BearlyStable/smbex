@@ -125,8 +125,14 @@ running one **yield the wire at the next chunk boundary** and resume later from 
 bytes already on disk — so when a 10 MB file is hogging a slow link and you want the
 5 KB text file now, press `J` on the big one (or `K` on the small one). Cancelling
 keeps the partial file too, so grabbing it again with `d` resumes rather than
-restarting. (On FTP, a transfer stopped early still drains its remaining bytes — see
-*Protocol fidelity* below; SMB and SFTP stop immediately.)
+restarting.
+
+**Not on FTP:** stopping a RETR early means draining the rest of the data connection
+anyway (see *Protocol fidelity* below), so the bytes arrive whether you keep them or
+not — smbex refuses to interrupt a *running* FTP transfer rather than lose a file you
+have already paid for, and says so. Queued transfers can still be cancelled and
+reordered on FTP; only the one on the wire is untouchable. SMB and SFTP stop
+immediately.
 
 Optional extras: `--preload` prefetches surrounding folders (toggle with `p`);
 `--translate <lang>` shows English filename translations beside the originals

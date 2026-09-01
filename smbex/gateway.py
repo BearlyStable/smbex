@@ -65,6 +65,12 @@ class Gateway:
     def connection_lost(self) -> bool:
         return self._connection_lost
 
+    @property
+    def interruptible(self) -> bool:
+        """Whether a transfer can be stopped early and actually save something
+        (False on FTP — see ``Backend.interruptible``)."""
+        return bool(getattr(self._backend, "interruptible", True))
+
     async def start(self) -> None:
         if self._worker is None:
             self._worker = asyncio.create_task(self._run())

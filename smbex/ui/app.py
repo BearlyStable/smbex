@@ -451,22 +451,31 @@ class SmbexApp(App):
             return
         item = items[self._panel_cursor]
         was_running = item.status == "running"
-        if self._downloads.reorder(item, delta):
+        result = self._downloads.reorder(item, delta)
+        if result in ("moved", "preempted"):
             moved = self._panel_items()
             if item in moved:
                 self._panel_cursor = moved.index(item)  # follow the item
-            if was_running and item.control == "yield":  # it just gave up the wire
+            if result == "preempted":
                 self._status_note(
                     f"{item.remote_path} yields at {int(item.progress * 100)}% — "
                     "it resumes from there when its turn comes round"
+                    if was_running
+                    else f"{item.remote_path} goes first — the running transfer yields"
                 )
-            elif item.status == "queued" and any(
-                it.control == "yield" for it in self._downloads.pending
-            ):
-                self._status_note(f"{item.remote_path} goes first — the running one yields")
+        elif result == "uninterruptible":
+            self._status_note(self._uninterruptible_note())
         elif item.status in ("running", "queued"):
             self._status_note("nothing to swap with — it's already at the end")
         self._refresh_downloads()
+
+    def _uninterruptible_note(self) -> str:
+        """Why a running transfer can't be stopped on this protocol."""
+        return (
+            "FTP sends the rest of the file whether or not we keep it, so a running "
+            "transfer can't be stopped early — let it finish (queued ones can be "
+            "cancelled and reordered)"
+        )
 
     def action_panel_cancel(self) -> None:
         """'x': cancel the selected transfer, or clear an entry that's finished."""
@@ -475,7 +484,9 @@ class SmbexApp(App):
             return
         item = items[self._panel_cursor]
         what = self._downloads.cancel(item)
-        if what == "stopping":
+        if what == "uninterruptible":
+            self._status_note(self._uninterruptible_note())
+        elif what == "stopping":
             self._status_note(
                 f"cancelling {item.remote_path} — the {int(item.progress * 100)}% "
                 "already fetched is kept, so 'd' resumes it"
@@ -850,7 +861,10 @@ class SmbexApp(App):
         if cancelled:
             parts.append(f"{cancelled} cancelled")
         if self._panel_open:
-            parts.append("j/k select · J/K reprioritize · x cancel · w close")
+            if self._downloads.can_interrupt:
+                parts.append("j/k select · J/K reprioritize · x cancel · w close")
+            else:  # FTP: the running transfer owns the wire until it finishes
+                parts.append("j/k select · J/K/x queued only · w close")
         elif len(items) > 1:
             parts.append("w for the full list")
         return " · ".join(parts)

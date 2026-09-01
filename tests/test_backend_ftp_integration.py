@@ -109,3 +109,18 @@ async def test_browse_ftp_through_the_tui(ftp_server):
         assert app.browser.path.endswith("logs")
         assert "app.log" in [e.name for e in app.browser.entries]
         await pilot.press("q")
+
+
+async def test_running_transfer_is_not_interruptible_over_real_ftp(ftp_server, tmp_path):
+    """A RETR can't be abandoned cheaply, so the manager refuses to stop one."""
+    from smbex.download import DownloadManager
+    from smbex.gateway import Gateway
+
+    async with Gateway(FtpBackend.connect(_auth(ftp_server))) as gw:
+        assert gw.interruptible is False  # declared by FtpBackend
+        mgr = DownloadManager(gw, tmp_path)
+        assert mgr.can_interrupt is False
+        item = await mgr.add_file("big.bin", 200_000)
+        item.status = "running"  # pretend it is the one in flight
+        assert mgr.cancel(item) == "uninterruptible"
+        assert item.control == ""

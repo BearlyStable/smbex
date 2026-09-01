@@ -50,15 +50,24 @@ async def test_cursor_moves_while_a_listing_is_stuck(make_app):
 
 
 async def test_key_repeat_costs_one_listing(make_app, settle):
-    """Holding j over 5 folders fetches only the one you land on."""
+    """Holding j over 5 folders fetches only the one you land on.
+
+    The settle is deliberately stretched here so the assertion is about coalescing
+    rather than about how fast the test machine can deliver five keypresses.
+    """
     app = make_app(dict(BIG_TREE))
     async with app.run_test() as pilot:
         await settle(app, pilot)  # the initial preview of d00
         backend = app._gateway._backend
         backend.list_calls.clear()
 
+        app.SIDE_REFRESH_DELAY = 2.0  # longer than the burst below can possibly take
         for _ in range(5):
             await pilot.press("j")
+        assert backend.list_calls == []  # still scrolling: nothing asked for yet
+
+        app.SIDE_REFRESH_DELAY = 0  # ... and now the scrolling stops
+        app._schedule_side_refresh()
         await settle(app, pilot)
 
         assert backend.list_calls == ["d05"]  # not d01..d05

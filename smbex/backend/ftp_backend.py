@@ -95,6 +95,14 @@ class _FtpFile:
 
 
 class FtpBackend:
+    #: A RETR cannot be abandoned cheaply: stopping early means draining the rest of
+    #: the data connection (ABOR desyncs ftplib's control channel), so the bytes come
+    #: over the wire whether or not we keep them. Cancelling or preempting a *running*
+    #: FTP transfer would therefore cost exactly what finishing it costs, minus the
+    #: file — so the UI doesn't offer it. Truly abandoning one would mean dropping and
+    #: re-establishing the control connection, i.e. a fresh login/audit event.
+    interruptible = False
+
     def __init__(self, ftp: FTP, start_rel: str = "", auth: FtpAuth | None = None):
         self._ftp = ftp
         self.start_rel = start_rel

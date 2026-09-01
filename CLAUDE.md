@@ -281,9 +281,19 @@ a slow connection. Feature list (all implemented — phases 0–9 done):
 >   `_preempt_if_displaced()`. So `J` on the running transfer and `K` on the queued one
 >   behind it are the same operation from either side: the big file yields, the small
 >   one goes now. With nothing to swap with, `reorder` returns False and the UI says so.
-> Caveat: on **FTP** a handle closed before EOF drains the rest of the data connection
-> (see the Phase 9 note), so an interrupted FTP transfer still costs its remaining
-> bytes; SMB/SFTP close immediately. Tested in `tests/test_download_control.py`
+> **FTP can't do this, and doesn't offer it.** A handle closed before EOF drains the
+> rest of the data connection (Phase 9 note), so stopping a running FTP transfer costs
+> exactly what finishing it costs, minus the file — and the drain occupies the gateway
+> worker while it runs. `Backend.interruptible` (True by default, **False** on
+> `FtpBackend`) surfaces that as a capability: `Gateway.interruptible` →
+> `DownloadManager.can_interrupt` → `cancel`/`reorder` return `"uninterruptible"` for a
+> move that would displace the *running* transfer, and the UI explains why instead of
+> throwing away a file already paid for. Queued transfers are untouched by this — they
+> never hit the wire, so cancelling and reordering them works on FTP too, and the panel
+> hint says "J/K/x queued only". Truly abandoning an FTP transfer would mean dropping
+> the control connection and logging in again; **deliberately not done** — see
+> [[ftp-transfer-interrupt-relogin]] in memory for the design and why it was declined.
+> Tested in `tests/test_download_control.py`
 > (chunk-level `ChunkGate` fixture in conftest holds a transfer mid-file) plus the UI
 > wiring in `tests/test_ui_downloads.py`.
 
