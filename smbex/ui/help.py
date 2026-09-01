@@ -31,8 +31,13 @@ _SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Transfer", [
         ("d", "download selection (recursive for folders)"),
         ("a", "download all files here"),
-        ("w", "show / hide the task panel"),
+        ("w", "open / close the task panel (all transfers)"),
         ("y / Y", "copy selection's name / full path to clipboard"),
+    ]),
+    ("Task panel (while open)", [
+        ("j / k", "select a transfer"),
+        ("K / J", "move a queued transfer up / down the queue"),
+        ("w h Esc", "close the panel"),
     ]),
     ("View", [
         ("[  ]", "show / hide parent / preview column"),

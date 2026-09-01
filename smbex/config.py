@@ -19,7 +19,7 @@ from pathlib import Path
 
 # Keys mirrored to argparse dests; the rest are treated as strings.
 _BOOL_KEYS = ("preload", "auto_reconnect", "parent", "preview", "flat")
-_STR_KEYS = ("translate", "sort", "theme", "download_dir")
+_STR_KEYS = ("translate", "sort", "theme", "download_dir", "download_panel")
 
 _SAMPLE = """\
 # smbex configuration.  Location: ~/.config/smbex/config.ini
@@ -50,6 +50,9 @@ preview = true
 
 # Local root for downloads (the remote tree is mirrored under DIR/<host>).
 download_dir = downloads
+
+# Task panel:  auto (appear only while transfers run) | hidden (only on 'w').
+download_panel = auto
 
 # Save downloads flat (true/false): one folder per host, the remote path folded
 # into each filename (share/2024/report.pdf -> share_2024_report.pdf).

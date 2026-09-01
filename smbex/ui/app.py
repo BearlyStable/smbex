@@ -96,6 +96,8 @@ class SmbexApp(App):
         Binding("y", "copy_name", "Copy name"),
         Binding("Y", "copy_path", "Copy path"),
         Binding("w", "toggle_downloads", "Tasks"),
+        Binding("J", "panel_lower", "Lower prio", show=False),
+        Binding("K", "panel_raise", "Raise prio", show=False),
         Binding("p", "toggle_preload", "Preload"),
         Binding("t", "toggle_translate", "Translate"),
         Binding("o", "cycle_sort", "Sort"),
@@ -118,6 +120,7 @@ class SmbexApp(App):
         translator: Translator | None = None,
         sort: str = "name",
         theme: str = "dark",
+        download_panel: str = "auto",
         show_parent: bool = True,
         show_preview: bool = True,
     ):
@@ -134,6 +137,12 @@ class SmbexApp(App):
         self._translator = translator
         # On when a language was configured (--translate); 't' toggles the display.
         self.translate_enabled = translator is not None
+        # Task panel: "auto" shows the transfers in flight and hides itself when the
+        # queue drains; "hidden" only ever appears on 'w'. 'w' opens the full list
+        # (finished entries included) and takes j/k for selection + J/K reordering.
+        self._panel_mode = download_panel if download_panel in ("auto", "hidden") else "auto"
+        self._panel_open = False
+        self._panel_cursor = 0
         self._conn_state = "connected"  # updated by the gateway on link changes
         self._preview_key = None  # what the preview last rendered (to re-render on change)
         self._side_seq = 0  # scheduled deferred side-column refreshes ...
@@ -183,6 +192,9 @@ class SmbexApp(App):
 
     # --- navigation actions ---------------------------------------------------
     async def action_cursor_down(self) -> None:
+        if self._panel_open:
+            self._panel_move(1)
+            return
         if self._view is not None:
             self._scroll_view(1)
             return
@@ -190,6 +202,9 @@ class SmbexApp(App):
         await self._refresh()
 
     async def action_cursor_up(self) -> None:
+        if self._panel_open:
+            self._panel_move(-1)
+            return
         if self._view is not None:
             self._scroll_view(-1)
             return
@@ -232,7 +247,7 @@ class SmbexApp(App):
             await self._refresh()
 
     async def action_enter(self) -> None:
-        if self._view is not None:
+        if self._panel_open or self._view is not None:
             return
         sel = self.browser.selected
         if sel is not None and not sel.is_dir:  # a file -> open the content view
@@ -245,6 +260,9 @@ class SmbexApp(App):
             self._status_error(exc)
 
     async def action_leave(self) -> None:
+        if self._panel_open:  # 'h' backs out of the task panel, like everywhere else
+            self.action_toggle_downloads()
+            return
         if self._view is not None:  # leave the content view, back to browsing
             self._close_file_view()
             await self._refresh()
@@ -256,6 +274,9 @@ class SmbexApp(App):
             self._status_error(exc)
 
     async def action_escape_view(self) -> None:
+        if self._panel_open:  # Esc closes the task panel first
+            self.action_toggle_downloads()
+            return
         if self._view is not None:  # Esc leaves the viewer; a no-op while browsing
             self._close_file_view()
             await self._refresh()
@@ -388,7 +409,7 @@ class SmbexApp(App):
             self.run_worker(self._downloads.add_dir(path, recursive=True), exclusive=False)
         else:
             await self._downloads.add_file(path, sel.size)
-        self._show_downloads()
+        self._refresh_downloads()
 
     async def action_download_all(self) -> None:
         files = [
@@ -398,15 +419,45 @@ class SmbexApp(App):
         ]
         if files:
             await self._downloads.add_files(files)
-            self._show_downloads()
+            self._refresh_downloads()
 
     def action_toggle_downloads(self) -> None:
-        self.query_one("#downloads", DownloadPanel).toggle_class("hidden")
+        """'w': open the full task list (and take j/k for it), or close it again."""
+        self._panel_open = not self._panel_open
+        if self._panel_open:
+            items = self._panel_items()
+            # Start on the first thing still moving — with a long queue that's what
+            # you came to look at.
+            self._panel_cursor = next(
+                (i for i, it in enumerate(items) if it.status in ("running", "queued")), 0
+            )
         self._refresh_downloads()
 
-    def _show_downloads(self) -> None:
-        self.query_one("#downloads", DownloadPanel).remove_class("hidden")
+    def _panel_move(self, delta: int) -> None:
+        items = self._panel_items()
+        if items:
+            self._panel_cursor = min(max(self._panel_cursor + delta, 0), len(items) - 1)
         self._refresh_downloads()
+
+    def _panel_reorder(self, delta: int) -> None:
+        """Move the selected *queued* transfer through the queue (J/K)."""
+        items = self._panel_items()
+        if not (self._panel_open and 0 <= self._panel_cursor < len(items)):
+            return
+        item = items[self._panel_cursor]
+        if self._downloads.reorder(item, delta):
+            moved = self._panel_items()
+            if item in moved:
+                self._panel_cursor = moved.index(item)  # follow the item
+        elif item.status == "running":
+            self._status_note("that transfer is already running — it can't be moved")
+        self._refresh_downloads()
+
+    def action_panel_raise(self) -> None:
+        self._panel_reorder(-1)
+
+    def action_panel_lower(self) -> None:
+        self._panel_reorder(1)
 
     # --- clipboard ------------------------------------------------------------
     # The listing panes render as a rich Table for column alignment, which Textual's
@@ -733,8 +784,43 @@ class SmbexApp(App):
     def _status_note(self, message: str) -> None:
         self.query_one("#status", Static).update(Text(f" {message}", style="yellow"))
 
+    def _panel_items(self) -> list:
+        """What the panel lists: everything while open, else only what's in flight."""
+        return self._downloads.items if self._panel_open else self._downloads.pending
+
+    def _panel_summary(self, items: list) -> str:
+        all_items = self._downloads.items
+        finished = sum(1 for i in all_items if i.status in ("done", "skipped"))
+        failed = sum(1 for i in all_items if i.status == "error")
+        parts = [f"downloads {finished}/{len(all_items)}"]
+        if failed:
+            parts.append(f"{failed} failed")
+        if self._panel_open:
+            parts.append("j/k select · J/K reprioritize · w close")
+        elif len(items) > 1:
+            parts.append("w for the full list")
+        return " · ".join(parts)
+
     def _refresh_downloads(self) -> None:
-        self.query_one("#downloads", DownloadPanel).render_items(self._downloads.items)
+        """Render the task panel — and decide whether it should be on screen at all.
+
+        Open: the full list with a cursor. Otherwise it appears only while transfers
+        are in flight (and only shows those), and disappears when they finish, so it
+        stops covering the browser the moment it has nothing to say.
+        """
+        panel = self.query_one("#downloads", DownloadPanel)
+        items = self._panel_items()
+        visible = self._panel_open or (self._panel_mode == "auto" and bool(items))
+        panel.set_class(not visible, "hidden")
+        if visible:
+            if self._panel_open and items:
+                self._panel_cursor = min(max(self._panel_cursor, 0), len(items) - 1)
+            panel.render_items(
+                items,
+                cursor=self._panel_cursor if self._panel_open else None,
+                max_rows=12 if self._panel_open else 4,
+                summary=self._panel_summary(items),
+            )
         self._update_status()
 
     def _should_paint_downloads(self) -> bool:
@@ -797,6 +883,13 @@ class SmbexApp(App):
             pass  # widgets may be gone during teardown
 
     def _update_status(self) -> None:
+        if self._panel_open:  # the task panel owns the keys while it's open
+            items = self._panel_items()
+            where = f"{min(self._panel_cursor + 1, len(items))}/{len(items)}" if items else "0/0"
+            self.query_one("#status", Static).update(
+                f" TASKS {where} │ j/k select · J/K reprioritize · w/h/Esc close"
+            )
+            return
         if self._view is not None:  # content-viewer status
             v = self._view
             if v.kind == "hex":
@@ -822,6 +915,13 @@ class SmbexApp(App):
         if items:
             finished = sum(1 for i in items if i.status in ("done", "skipped"))
             text += f" │ dl:{finished}/{len(items)}"
+            # The panel hides itself once the queue drains, so the tiny live readout
+            # here is what tells you a transfer is still going (and how far along).
+            running = next((i for i in items if i.status == "running"), None)
+            if running is not None:
+                text += f" ↓{int(running.progress * 100)}%"
+            elif any(i.status == "queued" for i in items):
+                text += " ↓queued"
         if self._translator is not None:
             t = self._translator
             if not self.translate_enabled:

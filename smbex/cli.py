@@ -178,6 +178,14 @@ def build_parser() -> argparse.ArgumentParser:
         "of recreating the remote tree",
     )
     ui.add_argument(
+        "--download-panel",
+        choices=("auto", "hidden"),
+        default="auto",
+        help="task panel: 'auto' appears while transfers are in flight (showing only "
+        "those) and hides itself when they finish; 'hidden' shows it only on 'w' "
+        "(default: auto)",
+    )
+    ui.add_argument(
         "--download-dir",
         metavar="DIR",
         default="downloads",
@@ -268,6 +276,7 @@ def _run_mux(args, translator) -> int:
         preload=args.preload,
         label=f"mux:{backend.label}",
         flat=args.flat,
+        download_panel=args.download_panel,
         download_root=Path(args.download_dir) / _safe(backend.host or "mux"),
         translator=translator,
         sort=args.sort,
@@ -358,6 +367,7 @@ def main(argv: list[str] | None = None) -> int:
             preload=args.preload,
             label=args.target,
             flat=args.flat,
+            download_panel=args.download_panel,
             download_root=Path(args.download_dir) / _safe(host),
             translator=translator,
             sort=args.sort,
@@ -386,6 +396,7 @@ def main(argv: list[str] | None = None) -> int:
         preload=args.preload,
         label=args.target,
         flat=args.flat,
+        download_panel=args.download_panel,
         download_root=Path(args.download_dir) / _safe(smb.host),
         translator=translator,
         sort=args.sort,

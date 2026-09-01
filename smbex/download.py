@@ -99,7 +99,11 @@ class DownloadManager:
         self._assigned: dict[str, Path] = {}
         self._claimed: dict[Path, str] = {}
         self.items: list[DownloadItem] = []
-        self._queue: "asyncio.Queue[DownloadItem]" = asyncio.Queue()
+        # The queue *is* ``items`` — the worker takes the first still-queued entry, so
+        # reordering the list reprioritizes the transfers (see :meth:`reorder`).
+        self._wake = asyncio.Event()  # set when work arrives
+        self._idle = asyncio.Event()  # set while nothing is queued or running
+        self._idle.set()
         self._worker: asyncio.Task | None = None
 
     # --- lifecycle ------------------------------------------------------------
@@ -118,7 +122,43 @@ class DownloadManager:
 
     async def join(self) -> None:
         """Wait until every queued download has been processed."""
-        await self._queue.join()
+        while self.pending:
+            self._idle.clear()
+            await self._idle.wait()
+
+    # --- queue state ----------------------------------------------------------
+    @property
+    def pending(self) -> list[DownloadItem]:
+        """Transfers still to do — running first, then queued in priority order."""
+        return [it for it in self.items if it.status in ("running", "queued")]
+
+    def _next_queued(self) -> DownloadItem | None:
+        for item in self.items:
+            if item.status == "queued":
+                return item
+        return None
+
+    def reorder(self, item: DownloadItem, delta: int) -> bool:
+        """Move a *queued* item one place up (-1) or down (+1) the queue.
+
+        The worker always takes the first queued entry, so swapping two of them is
+        what changes priority. A running transfer doesn't move — it is already on
+        the wire — and finished entries are skipped over rather than swapped with.
+        """
+        if item.status != "queued" or not delta:
+            return False
+        queued = [i for i, it in enumerate(self.items) if it.status == "queued"]
+        try:
+            pos = queued.index(self.items.index(item))
+        except ValueError:
+            return False
+        target = pos + (1 if delta > 0 else -1)
+        if not 0 <= target < len(queued):
+            return False
+        here, there = queued[pos], queued[target]
+        self.items[here], self.items[there] = self.items[there], self.items[here]
+        self._notify()
+        return True
 
     def _notify(self) -> None:
         if self.on_change is not None:
@@ -162,7 +202,8 @@ class DownloadManager:
     async def add_file(self, remote_path: str, size: int = 0) -> DownloadItem:
         item = DownloadItem(remote_path, self._local_for(remote_path), size)
         self.items.append(item)
-        await self._queue.put(item)
+        self._idle.clear()
+        self._wake.set()
         self._notify()
         return item
 
@@ -190,7 +231,12 @@ class DownloadManager:
     # --- worker ---------------------------------------------------------------
     async def _run(self) -> None:
         while True:
-            item = await self._queue.get()
+            item = self._next_queued()
+            if item is None:  # drained: park until something is added
+                self._idle.set()
+                self._wake.clear()
+                await self._wake.wait()
+                continue
             try:
                 await self._download(item)
             except asyncio.CancelledError:
@@ -200,7 +246,6 @@ class DownloadManager:
                 item.error = str(exc)
             finally:
                 self._notify()
-                self._queue.task_done()
 
     async def _download(self, item: DownloadItem) -> None:
         item.local_path.parent.mkdir(parents=True, exist_ok=True)
