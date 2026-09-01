@@ -72,6 +72,14 @@ class Gateway:
     async def _run(self) -> None:
         while True:
             job = await self._queue.get()
+            if job.future.done():
+                # Nobody is waiting for this any more — the awaiting task was
+                # cancelled (a cursor move that outran its preview fetch, say), which
+                # cancels the future. Skipping it keeps a scroll burst off the wire
+                # even for jobs already queued, instead of serializing dead work in
+                # front of the listing that is actually wanted.
+                self._queue.task_done()
+                continue
             try:
                 # Raw jobs (a manual reconnect) run directly, without drop handling.
                 result = await (

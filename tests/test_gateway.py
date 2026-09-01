@@ -87,3 +87,24 @@ async def test_browse_preempts_between_download_chunks():
     assert backend.events.index("list:marker") < backend.events.index(
         f"read:big@{CHUNK}"
     )
+
+
+async def test_cancelled_request_is_dropped_before_it_hits_the_backend():
+    """A queued job whose caller gave up must never reach the wire.
+
+    Browsing away cancels the awaiting task (and with it the future), so the job is
+    dead weight — running it would delay the listing the user is actually waiting on.
+    """
+    backend = FakeBackend({"a": {}, "b": {}, "c": {}})
+    backend.gates["a"] = threading.Event()  # hold the worker on the first job
+    async with Gateway(backend) as gw:
+        first = asyncio.create_task(gw.list("a"))
+        await asyncio.sleep(0)  # let the worker pick "a" up and block on it
+        abandoned = asyncio.create_task(gw.list("b"))
+        await asyncio.sleep(0)
+        abandoned.cancel()  # the caller moved on
+
+        backend.gates["a"].set()
+        assert [e.name for e in await first] == []
+        assert [e.name for e in await gw.list("c")] == []  # a later job still runs
+        assert "b" not in backend.list_calls  # ... and the dead one never listed

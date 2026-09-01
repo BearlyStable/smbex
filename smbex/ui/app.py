@@ -11,6 +11,7 @@ The app owns the gateway and download-manager lifecycles and renders a ``Browser
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 from rich.text import Text
@@ -558,8 +559,11 @@ class SmbexApp(App):
             self._side_ack = self._side_seq  # nothing to wait for
             return
         self._side_seq += 1
+        # A *callable*, not a coroutine: an exclusive worker replaced before it starts
+        # would otherwise leave an un-awaited coroutine behind (RuntimeWarning), and a
+        # fast scroll replaces plenty of them.
         self.run_worker(
-            self._side_refresh(self._side_seq, self._side_key()),
+            partial(self._side_refresh, self._side_seq, self._side_key()),
             group="side",
             exclusive=True,
         )
@@ -645,7 +649,7 @@ class SmbexApp(App):
             return
         key = (self.browser.path, entry.name)
         self.run_worker(
-            self._translate_preview(entry, body, truncated, key),
+            partial(self._translate_preview, entry, body, truncated, key),
             group="preview-xlate",
             exclusive=True,
         )
@@ -761,7 +765,9 @@ class SmbexApp(App):
         missing = [(top + i, ln) for i, ln in enumerate(lines) if (top + i) not in v.translations]
         if not missing:
             return
-        self.run_worker(self._do_translate_view(v, missing), group="view-xlate", exclusive=True)
+        self.run_worker(
+            partial(self._do_translate_view, v, missing), group="view-xlate", exclusive=True
+        )
 
     async def _do_translate_view(self, v, missing) -> None:
         import asyncio
