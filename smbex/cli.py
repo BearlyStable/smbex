@@ -31,8 +31,11 @@ Connect (SMB / SSH / FTP / mux), then press '?' in-app for all keys:
   h/j/k/l move, l/Enter open, d download, [ ] hide columns, q quit.
 
 Config file (your defaults; command-line flags still override it):
-  smbex --write-config                  writes ~/.config/smbex/config.ini, then edit it
-  keys: preload, auto_reconnect, sort, theme, parent, preview, translate, download_dir
+  smbex --write-config                  writes a commented ~/.config/smbex/config.ini
+  smbex --translate ja --flat --preload --save-config
+                                        saves the options you just used as defaults
+  keys: preload, auto_reconnect, sort, theme, parent, preview, translate,
+        download_dir, download_panel, flat
 
 Offline filename translation (optional; runs entirely on this machine):
   1. engine (once):   pip install ctranslate2 sentencepiece
@@ -149,7 +152,15 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument(
         "--write-config",
         action="store_true",
-        help="write a commented sample config to the config path, then exit",
+        help="write a commented sample config (built-in defaults) to the config path, "
+        "then exit",
+    )
+    ui.add_argument(
+        "--save-config",
+        action="store_true",
+        help="save the options in effect for this command line as your defaults "
+        "(config file, comments kept), then exit — e.g. "
+        "`smbex --translate ja --flat --preload --save-config`",
     )
     ui.add_argument(
         "--translate",
@@ -314,6 +325,16 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:  # noqa: BLE001 - report cleanly and exit non-zero
             raise SystemExit(f"model install failed: {exc}")
         print(f"Installed to {dest}.  Launch with:  --translate {code}")
+        return 0
+
+    if args.save_config:  # persist the options in effect (config + this command line)
+        from smbex.config import save_config, settings
+
+        path = save_config(vars(args), args.config)
+        chosen = settings(vars(args))
+        print(f"Saved current options to {path}")
+        for key, value in chosen.items():
+            print(f"  {key} = {'true' if value is True else 'false' if value is False else value}")
         return 0
 
     if args.mux is None and not args.target:

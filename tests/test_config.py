@@ -5,8 +5,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from smbex.cli import build_parser
-from smbex.config import config_path, load_config, write_sample_config
+from smbex.cli import build_parser, main
+from smbex.config import (
+    DEFAULTS,
+    config_path,
+    load_config,
+    save_config,
+    settings,
+    write_sample_config,
+)
 
 
 def test_config_path_uses_xdg_and_explicit(monkeypatch, tmp_path):
@@ -49,6 +56,49 @@ def test_write_sample_config_roundtrips(tmp_path):
     cfg = load_config(path)
     assert cfg["preload"] is False and cfg["sort"] == "name"
     assert "translate" not in cfg  # blank in the sample -> omitted
+
+
+def test_save_config_roundtrips_the_options_in_effect(tmp_path):
+    path = tmp_path / "config.ini"
+    args = {"translate": "ja", "flat": True, "sort": "newest", "download_panel": "hidden"}
+    assert save_config(args, path) == path
+    assert load_config(path) == {
+        "preload": False,
+        "auto_reconnect": False,
+        "parent": True,
+        "preview": True,
+        "flat": True,
+        "translate": "ja",
+        "sort": "newest",
+        "theme": "dark",
+        "download_dir": "downloads",
+        "download_panel": "hidden",
+    }
+    assert "# Prefetch surrounding folders" in path.read_text()  # comments kept
+
+
+def test_settings_fills_in_defaults_and_ignores_unrelated_keys():
+    chosen = settings({"flat": True, "target": "user@host", "hashes": "x:y"})
+    assert chosen["flat"] is True
+    assert chosen["sort"] == DEFAULTS["sort"] and chosen["translate"] == ""
+    assert "target" not in chosen and "hashes" not in chosen  # secrets never persist
+
+
+def test_save_config_cli_writes_and_exits(tmp_path, capsys):
+    cfg = tmp_path / "config.ini"
+    assert main(["--translate", "ja", "--flat", "--config", str(cfg), "--save-config"]) == 0
+    assert "translate = ja" in capsys.readouterr().out
+    assert load_config(cfg)["translate"] == "ja"  # no target needed, nothing launched
+
+
+def test_saved_config_becomes_the_new_defaults(tmp_path):
+    cfg = tmp_path / "config.ini"
+    save_config({"flat": True, "preload": True, "translate": "ja"}, cfg)
+    parser = build_parser()
+    parser.set_defaults(**load_config(cfg))
+    args = parser.parse_args(["host"])
+    assert args.flat is True and args.preload is True and args.translate == "ja"
+    assert parser.parse_args(["host", "--no-flat"]).flat is False  # CLI still wins
 
 
 def test_precedence_builtin_config_cli(tmp_path):
