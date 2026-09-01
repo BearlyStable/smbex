@@ -227,8 +227,15 @@ a slow connection. Feature list (all implemented — phases 0–9 done):
 > never a stale neighbour's listing. `Browser.parent_path`/`preview_path`/`peek()` are
 > the cache-only accessors (`ListingCache.peek` skips hit/miss accounting so a
 > speculative look isn't counted as a browse); `SmbexApp.wait_for_side_refresh()` is the
-> hook tests await (fixture `settle`). Tested in `tests/test_ui_responsive.py` (a gated
-> `FakeBackend.list` proves the cursor moves with a fetch stuck in flight).
+> hook tests await (fixture `settle`). Tested in `tests/test_ui_responsive.py`, which
+> is the **regression guard for the lag** — a green suite is meant to mean "scrolling
+> is still fluid": a gated `FakeBackend.list` proves the cursor moves (and stays under
+> budget) with a fetch stuck in flight; `test_a_cursor_move_makes_no_backend_call`
+> pins that the key handler never talks to the backend; and two cost tests bound the
+> per-keystroke work (< 25 ms in a 20k-entry folder with 2k queued downloads — ~1 ms
+> in practice) and pin that render cost doesn't grow with folder size. All were
+> checked to **fail** against the pre-fix code (340 ms/keystroke unwindowed; the
+> inline-fetch version deadlocks outright on the gated-listing test).
 
 > Flat downloads note (`--flat`, config `flat`): `DownloadManager(flat=True)` maps every
 > remote file into the single per-host root, `smbex/download.py` `flat_name()` joining
