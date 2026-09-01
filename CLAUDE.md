@@ -18,9 +18,12 @@ a slow connection. Feature list (all implemented — phases 0–9 done):
 - **In-session listing cache** so revisiting a folder is instant. **Session-only —
   never persisted to disk.**
 - **Background downloads** (single file / all files in current folder / recursive
-  folder), replicating the remote tree locally. Viewable download list + progress.
+  folder), replicating the remote tree locally — or **flat** (`--flat`): one folder
+  per host, remote path folded into each filename. Task panel with progress, which
+  stays out of the way and can reprioritize the queue.
 - **Browsing has priority**: downloads are throttled to whatever bandwidth is left
-  so navigation stays snappy.
+  so navigation stays snappy, and **no keystroke ever waits on the wire** (cursor
+  moves render from memory; side-column listings are fetched after a settle).
 - **Preloading** of surrounding folders' listings (toggleable off).
 - **Offline translation** of filenames to English, shown beside the original when
   toggled. Any language; each language is one downloadable model file.
@@ -106,11 +109,18 @@ a slow connection. Feature list (all implemented — phases 0–9 done):
 > `$XDG_CONFIG_HOME/smbex/config.ini` (or `--config PATH`). INI not TOML — `tomllib`
 > is 3.11+ only and we target 3.10 apt-only. Precedence is **built-in < config < CLI**:
 > `main()` pre-parses to find `--config`, then `parser.set_defaults(**load_config(...))`
-> before the real parse. Keys mirror argparse dests: `preload`, `auto_reconnect`,
-> `translate`, `sort` (name/newest/oldest), `download_dir`; `--preload`/`--auto-reconnect`
-> are `BooleanOptionalAction` so config-on can be overridden with `--no-…`. `--sort`
-> seeds `SmbexApp(sort=…)` → `browser.sort_mode` via `SORT_BY_LABEL`. `--write-config`
-> drops a commented sample. `theme` is also persisted (see Theming note). Tested in
+> before the real parse. Keys mirror argparse dests and are listed in `DEFAULTS`:
+> `preload`, `auto_reconnect`, `translate`, `sort` (name/newest/oldest), `theme`,
+> `parent`, `preview`, `download_dir`, `download_panel` (auto/hidden), `flat`;
+> `--preload`/`--auto-reconnect`/`--parent`/`--preview`/`--flat` are
+> `BooleanOptionalAction` so config-on can be overridden with `--no-…`. `--sort`
+> seeds `SmbexApp(sort=…)` → `browser.sort_mode` via `SORT_BY_LABEL`. Two writers,
+> one commented `_TEMPLATE` (so a written file can't drift from the sample):
+> `--write-config` renders `DEFAULTS`, `--save-config` renders the options *in effect*
+> for that command line (`save_config(vars(args))` — i.e. built-in < config < CLI, the
+> same merge the app runs with) and exits, printing what it stored. Only `DEFAULTS`
+> keys are written, so a target/password/hash on the same command line never lands on
+> disk. Tested in
 > `tests/test_config.py`. Reconnect over SSH/SFTP is verified too
 > (`tests/test_backend_ssh_integration.py::test_ssh_reconnect_after_drop`).
 
@@ -183,8 +193,11 @@ a slow connection. Feature list (all implemented — phases 0–9 done):
 > (`SmbexApp._entry_markers` → `Column.show(markers=...)`, styled in `columns.py`
 > `MARKER_STYLE`): `·` dir listing cached (`path in browser.cache`), `↓` queued/
 > downloading, `✓` downloaded, `✗` error. Folders aggregate the `DownloadManager.items`
-> beneath them; files match their own `remote_path`. Pure render over in-memory state
-> (no backend calls); re-rendered live on download progress via `_on_downloads_change`.
+> beneath them; files match their own `remote_path` — bucketed in **one pass** over the
+> download items (a per-entry scan was O(entries × downloads) on every repaint). Pure
+> render over in-memory state (no backend calls); re-rendered live on download progress
+> via `_on_downloads_change`, which coalesces progress repaints to 10/s (a status change
+> always paints immediately).
 > Tested in `tests/test_ui_markers.py`. Only the current column is marked (its
 > `child_path` is the correct base); parent/preview are left plain.
 
@@ -194,6 +207,54 @@ a slow connection. Feature list (all implemented — phases 0–9 done):
 > `Column.rendered_text` is a plain-text side-channel for tests. Parent/preview columns
 > are toggleable (`[`/`]`, `--parent`/`--preview`, config `parent`/`preview`); a hidden
 > column skips its fetch (`_refresh`) and render — saves a round-trip on a slow link.
+> **Only the visible window is rendered** (`Column.window`): a keystroke in a 10k-entry
+> folder would otherwise rebuild 10k rich rows, and the cursor could walk off the pane
+> (nothing scrolled it). The window follows the cursor with a 2-row scrolloff. This
+> needs a *known* height, so `Column` is `height: 100%` and clips (`overflow: hidden`) —
+> the columns used to auto-size to content, so their own height couldn't drive it (the
+> file viewer takes its height from the `#columns` container for the same reason).
+
+> Responsiveness note (cursor never blocks): a keypress must not await a listing.
+> `SmbexApp._refresh` = `_render_now()` (paints all three columns from `browser.entries`
+> + the cache — no backend call, no await) followed by `_schedule_side_refresh()`,
+> which fetches only the *uncached* parent/preview listings after `SIDE_REFRESH_DELAY`
+> (0.12 s) in an **exclusive** worker (`group="side"`). A newer cursor position cancels
+> the pending one *during the settle*, so a key repeat never reaches the wire — holding
+> `j` over 30 folders costs one listing (where you stopped), not 30 serialized behind
+> each other. Cancelling after submission would **not** help: a queued gateway job runs
+> regardless of who is awaiting it, which is why the debounce (not the cancel) is what
+> keeps the wire quiet. An uncached side column renders `Column.show_loading()` ("…"),
+> never a stale neighbour's listing. `Browser.parent_path`/`preview_path`/`peek()` are
+> the cache-only accessors (`ListingCache.peek` skips hit/miss accounting so a
+> speculative look isn't counted as a browse); `SmbexApp.wait_for_side_refresh()` is the
+> hook tests await (fixture `settle`). Tested in `tests/test_ui_responsive.py` (a gated
+> `FakeBackend.list` proves the cursor moves with a fetch stuck in flight).
+
+> Flat downloads note (`--flat`, config `flat`): `DownloadManager(flat=True)` maps every
+> remote file into the single per-host root, `smbex/download.py` `flat_name()` joining
+> the path components with `_` (`share/2024/report.pdf` → `share_2024_report.pdf`).
+> Path separators + non-portable characters → `_` (non-ASCII kept: CJK names survive);
+> truncation is in **bytes** keeping the extension (255-byte FS limit, CJK = 3 B/char).
+> A name is assigned **once per remote path** (`_assigned`/`_claimed`) so resume and the
+> preview's "is this downloaded?" lookup agree; a clash between two *different* remote
+> paths (`a/b_c.txt` vs `a_b/c.txt` fold alike) is numbered `a_b_c~2.txt` — `~`, not
+> `_`, so a counter can't be misread as a path component. An existing file for the
+> *same* remote path is left alone: that's resume, not a clash.
+> Tested in `tests/test_download_flat.py`.
+
+> Task panel note: the panel covered the browser even with nothing to say, and a long
+> queue pushed the live transfers out of view. Now `_refresh_downloads` decides
+> visibility: mode `auto` (default) shows it only while `DownloadManager.pending` is
+> non-empty and lists *only* those (max 4 rows), hiding itself when the queue drains;
+> `--download-panel hidden` (config `download_panel`) never shows it unasked. The
+> always-on readout is in the status bar (`dl:3/12 ↓47%`). `w` opens the full list
+> (finished included) and makes the panel **modal**: `j`/`k` select (the panel windows
+> around the cursor), `K`/`J` call `DownloadManager.reorder(item, ∓1)`, `w`/`h`/`Esc`
+> close. Reordering is why the queue *is* `items`: the worker takes the first entry
+> still `queued` (`_next_queued`), so swapping two queued entries changes what's next —
+> an `asyncio.Queue` plus a parallel display list could not express that. A `running`
+> item doesn't move (already on the wire) and says so. `join()` waits on `pending` via
+> the `_idle`/`_wake` events. Tested in `tests/test_ui_downloads.py`.
 
 > File viewer note: `l`/`Enter`/`Right` on a **downloaded text** file opens the content
 > viewer (`SmbexApp._enter_file_view`, `_FileViewState`, `smbex/viewer.py` `LazyLines`).
@@ -239,8 +300,6 @@ Smaller items raised in discussion (not blocking):
   on-demand folder-size item; SSH can shortcut with `find DIR -printf '%T@\n' | sort
   -n | tail -1`. Also optional: a richer SMB-only view of creation/change times
   (SFTP v3 has neither).
-- **Download reordering.** The download queue is FIFO with no way to prioritize one
-  transfer; consider a "jump to front" key on the task panel.
 - **On-demand folder sizes.** Not shown today (see Key decisions). If wanted: a key
   that computes the selected folder's recursive size at low priority and caches it;
   SSH can shell out to `du -sb`.
@@ -252,7 +311,8 @@ Smaller items raised in discussion (not blocking):
 
 Actual keybindings today: `h/j/k/l`+arrows, `g`/`G`, `l`/`Enter` open, `h` up,
 `d` download selected (file, or folder recursively), `a` all files here, `w` task
-panel, `o` cycle sort (name→newest→oldest), `p` preload toggle (prefetches
+panel (then `j`/`k` select, `K`/`J` reprioritize a queued transfer, `w`/`h`/`Esc`
+close), `o` cycle sort (name→newest→oldest), `p` preload toggle (prefetches
 surrounding folders), `r` reconnect (after a dropped link; auto only with
 `--auto-reconnect`), `t` translate toggle (English beside originals; needs
 `--translate <lang>`), `T` cycle colour theme (dark/light/nord/gruvbox),
@@ -260,7 +320,8 @@ surrounding folders), `r` reconnect (after a dropped link; auto only with
 
 ## Install & environment
 
-Dev was done on Fedora 44 / Python 3.13. Deploy target is **Kali**, where the user
+Dev was done on Fedora 44 / Python 3.14 (a 3.13-built `.venv` breaks when Fedora
+retires the interpreter — rebuild it, don't debug it). Deploy target is **Kali**, where the user
 installs Python deps **via apt only** (no pip).
 
 ### Kali (apt) — the user's environment
@@ -286,9 +347,9 @@ Approximate versions in Kali rolling (Debian sid), confirmed on packages.debian.
 | textual | `python3-textual` | 8.2.3 | 8.2.8 | needs the theme API (Textual ≳ 2.x; sid is fine, Debian *stable* trixie=2.1.2 ok, bookworm=0.1.13 **too old**) |
 | pytest | `python3-pytest` | — | 9.1.1 | dev/test |
 | pytest-asyncio | `python3-pytest-asyncio` | 1.4.0 | 1.4.0 | dev/test; `asyncio_mode=auto` set in pyproject |
-| pyftpdlib | `python3-pyftpdlib` | 2.0.x | 2.0.x | **dev/test only** — in-process FTP server for the FTP integration tests. FTP runtime itself is stdlib `ftplib` (no dep). |
-| ctranslate2 | **none** | — | 4.8.1 | **NOT in apt.** Translation inference engine; small wheel. |
-| sentencepiece | `python3-sentencepiece` | 0.2.x | 0.2.1 | Tokeniser. In apt, but pip-installing it with ctranslate2 is simplest. |
+| pyftpdlib | `python3-pyftpdlib` | 2.0.x | 2.2.0 | **dev/test only** — in-process FTP server for the FTP integration tests. FTP runtime itself is stdlib `ftplib` (no dep). |
+| ctranslate2 | **none** | — | 4.8.2 | **NOT in apt.** Translation inference engine; small wheel. |
+| sentencepiece | `python3-sentencepiece` | 0.2.x | 0.2.2 | Tokeniser. In apt, but pip-installing it with ctranslate2 is simplest. |
 
 > Translation is opt-in and lazy-imported: the core app is fully functional and
 > testable without it. The engine is **CTranslate2 + SentencePiece driving an Argos

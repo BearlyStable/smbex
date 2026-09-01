@@ -108,9 +108,17 @@ Listings show a compact age (`3d`, `2w`) and file sizes; `o` cycles the sort
 (name → newest → oldest). A status gutter marks folders whose listing is cached
 (`·`), and files/folders queued (`↓`) / downloaded (`✓`).
 Download in the background: `d` (selected file, or a folder recursively), `a` (all
-files in the current folder), `w` (show/hide the task panel). Downloads mirror the
-remote tree under `DIR/<host>` (`--download-dir`, default `./downloads`), resume
-partial files, skip complete ones, and yield to browsing so navigation stays snappy.
+files in the current folder). Downloads mirror the remote tree under `DIR/<host>`
+(`--download-dir`, default `./downloads`), resume partial files, skip complete ones,
+and yield to browsing so navigation stays snappy. `--flat` instead drops everything
+into the one per-host folder with the remote path folded into each name
+(`share/2024/report.pdf` → `share_2024_report.pdf`; clashes are numbered `~2`).
+
+The task panel stays out of the way: it appears only while transfers are in flight,
+lists just those, and disappears when they finish (`--download-panel hidden` keeps it
+off screen entirely; the status bar always shows `dl:3/12 ↓47%`). `w` opens the full
+list — there `j`/`k` select a transfer and `K`/`J` move a queued one up or down the
+queue to change what is fetched next; `w`/`h`/`Esc` close it.
 
 Optional extras: `--preload` prefetches surrounding folders (toggle with `p`);
 `--translate <lang>` shows English filename translations beside the originals
@@ -129,7 +137,12 @@ Defaults live in a config file (`~/.config/smbex/config.ini`; flags override it)
 
 ```sh
 python3 -m smbex --write-config          # drop a commented sample, then edit it
+# ...or save the options you just used as your defaults (comments kept):
+python3 -m smbex --translate ja --flat --preload --save-config
 ```
+
+Keys: `preload`, `auto_reconnect`, `sort`, `theme`, `parent`, `preview`, `translate`,
+`download_dir`, `download_panel`, `flat`.
 
 `smbex --help` ends with a **quickstart** covering connecting, the config file, and
 the one-time translation-model setup (with the model index URL).
