@@ -61,6 +61,19 @@ Translation runs entirely on this machine (no filename leaves the box); the only
 network use is that one-time model download. See CLAUDE.md → *Install* for details
 (offline `--model-file`, reusing existing Argos models, etc.).
 
+Models are stored per user, one directory per language pair, and `--install-lang`
+prints the destination when it finishes:
+
+```sh
+~/.local/share/smbex/models/ja_en/      # $XDG_DATA_HOME/smbex/models/ if that is set
+                                        # SMBEX_MODEL_DIR overrides both
+```
+
+Each is ~130 MB; delete the directory to remove that language. An existing
+`argostranslate` install is reused in place rather than re-downloaded — packages
+under `~/.local/share/argos-translate/packages/` (or `$ARGOS_PACKAGES_DIR`) are
+discovered as well.
+
 ### Development (any distro, venv)
 
 ```sh
