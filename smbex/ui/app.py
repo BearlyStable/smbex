@@ -99,6 +99,7 @@ class SmbexApp(App):
         Binding("w", "toggle_downloads", "Tasks"),
         Binding("J", "panel_lower", "Lower prio", show=False),
         Binding("K", "panel_raise", "Raise prio", show=False),
+        Binding("x", "panel_cancel", "Cancel dl", show=False),
         Binding("p", "toggle_preload", "Preload"),
         Binding("t", "toggle_translate", "Translate"),
         Binding("o", "cycle_sort", "Sort"),
@@ -149,6 +150,7 @@ class SmbexApp(App):
         self._side_seq = 0  # scheduled deferred side-column refreshes ...
         self._side_ack = 0  # ... and finished ones (equal == nothing pending)
         self._dl_paint = (0.0, ())  # last download repaint: (time, status signature)
+        self._note: tuple[str, float] | None = None  # transient status-bar message
         self._view: _FileViewState | None = None  # set while a file's content is open
 
     @property
@@ -381,6 +383,8 @@ class SmbexApp(App):
                     glyph = "↓"
                 elif "error" in statuses:
                     glyph = "✗"
+                elif "cancelled" in statuses:
+                    glyph = "⊘"  # stopped part-way; whatever arrived is on disk
                 elif statuses <= {"done", "skipped"}:
                     glyph = "✓"
             if glyph == " " and entry.is_dir and self.browser.child_path(entry.name) in cache:
@@ -446,12 +450,41 @@ class SmbexApp(App):
         if not (self._panel_open and 0 <= self._panel_cursor < len(items)):
             return
         item = items[self._panel_cursor]
+        was_running = item.status == "running"
         if self._downloads.reorder(item, delta):
             moved = self._panel_items()
             if item in moved:
                 self._panel_cursor = moved.index(item)  # follow the item
-        elif item.status == "running":
-            self._status_note("that transfer is already running — it can't be moved")
+            if was_running and item.control == "yield":  # it just gave up the wire
+                self._status_note(
+                    f"{item.remote_path} yields at {int(item.progress * 100)}% — "
+                    "it resumes from there when its turn comes round"
+                )
+            elif item.status == "queued" and any(
+                it.control == "yield" for it in self._downloads.pending
+            ):
+                self._status_note(f"{item.remote_path} goes first — the running one yields")
+        elif item.status in ("running", "queued"):
+            self._status_note("nothing to swap with — it's already at the end")
+        self._refresh_downloads()
+
+    def action_panel_cancel(self) -> None:
+        """'x': cancel the selected transfer, or clear an entry that's finished."""
+        items = self._panel_items()
+        if not (self._panel_open and 0 <= self._panel_cursor < len(items)):
+            return
+        item = items[self._panel_cursor]
+        what = self._downloads.cancel(item)
+        if what == "stopping":
+            self._status_note(
+                f"cancelling {item.remote_path} — the {int(item.progress * 100)}% "
+                "already fetched is kept, so 'd' resumes it"
+            )
+        elif what == "cancelled":
+            self._status_note(f"cancelled {item.remote_path}")
+        else:
+            self._status_note(f"cleared {item.remote_path}")
+        self._panel_cursor = min(self._panel_cursor, max(0, len(self._panel_items()) - 1))
         self._refresh_downloads()
 
     def action_panel_raise(self) -> None:
@@ -787,7 +820,19 @@ class SmbexApp(App):
             v.translations[i] = text
         self._render_view()  # cached now -> no new worker spawned
 
+    #: How long a one-off message (copied, cancelled, yielded…) keeps the status bar.
+    NOTE_SECONDS = 4.0
+
     def _status_note(self, message: str) -> None:
+        """Say something in the status bar and keep it there for a few seconds.
+
+        Without the hold, the next repaint — a download reporting progress, or the
+        panel refresh that follows the very action being reported — would wipe the
+        message before it could be read.
+        """
+        import time
+
+        self._note = (message, time.monotonic())
         self.query_one("#status", Static).update(Text(f" {message}", style="yellow"))
 
     def _panel_items(self) -> list:
@@ -798,11 +843,14 @@ class SmbexApp(App):
         all_items = self._downloads.items
         finished = sum(1 for i in all_items if i.status in ("done", "skipped"))
         failed = sum(1 for i in all_items if i.status == "error")
+        cancelled = sum(1 for i in all_items if i.status == "cancelled")
         parts = [f"downloads {finished}/{len(all_items)}"]
         if failed:
             parts.append(f"{failed} failed")
+        if cancelled:
+            parts.append(f"{cancelled} cancelled")
         if self._panel_open:
-            parts.append("j/k select · J/K reprioritize · w close")
+            parts.append("j/k select · J/K reprioritize · x cancel · w close")
         elif len(items) > 1:
             parts.append("w for the full list")
         return " · ".join(parts)
@@ -883,17 +931,27 @@ class SmbexApp(App):
     def _on_conn_status(self, state: str) -> None:
         """Gateway link-state callback ('reconnecting'/'connected'/'disconnected')."""
         self._conn_state = state
+        self._note = None  # a link change outranks whatever was being said
         try:
             self._update_status()
         except Exception:
             pass  # widgets may be gone during teardown
 
     def _update_status(self) -> None:
+        import time
+
+        if self._note is not None:
+            message, at = self._note
+            if time.monotonic() - at < self.NOTE_SECONDS:
+                self.query_one("#status", Static).update(Text(f" {message}", style="yellow"))
+                return
+            self._note = None
         if self._panel_open:  # the task panel owns the keys while it's open
             items = self._panel_items()
             where = f"{min(self._panel_cursor + 1, len(items))}/{len(items)}" if items else "0/0"
             self.query_one("#status", Static).update(
-                f" TASKS {where} │ j/k select · J/K reprioritize · w/h/Esc close"
+                f" TASKS {where} │ j/k select · J/K reprioritize · x cancel/clear"
+                " · w/h/Esc close"
             )
             return
         if self._view is not None:  # content-viewer status

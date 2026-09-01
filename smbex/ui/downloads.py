@@ -23,6 +23,7 @@ _STATUS_STYLE = {
     "skipped": "dim",
     "error": "bold red",
     "queued": "dim",
+    "cancelled": "dim yellow",
 }
 
 

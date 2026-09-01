@@ -71,3 +71,19 @@ async def test_no_state_no_download_glyphs_at_root(make_app):
         assert "✓" not in current.rendered_text
         assert "✗" not in current.rendered_text
         await pilot.press("q")
+
+
+async def test_cancelled_download_shows_the_partial_glyph(make_app):
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.press("j")
+        await pilot.press("l")  # into "share"
+        app._downloads.items.append(
+            DownloadItem(
+                app.browser.child_path("readme.txt"), Path("x"), size=5, downloaded=2,
+                status="cancelled",
+            )
+        )
+        app._on_downloads_change()
+        assert "⊘" in app.query_one("#current", Column).rendered_text
+        await pilot.press("q")

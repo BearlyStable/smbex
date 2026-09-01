@@ -36,7 +36,8 @@ _SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ]),
     ("Task panel (while open)", [
         ("j / k", "select a transfer"),
-        ("K / J", "move a queued transfer up / down the queue"),
+        ("K / J", "move up / down the queue (crossing the running one pauses it)"),
+        ("x", "cancel a transfer, or clear a finished entry"),
         ("w h Esc", "close the panel"),
     ]),
     ("View", [

@@ -137,20 +137,103 @@ async def test_panel_cursor_and_reordering(make_app, tmp_path):
         await pilot.press("q")
 
 
-async def test_running_transfer_cannot_be_reordered(make_app, tmp_path):
+async def test_pushing_the_running_transfer_down_makes_it_yield(make_app, tmp_path):
+    """'J' on the transfer in flight hands the wire to the one behind it."""
     app = make_app(dict(TREE), download_root=tmp_path)
     async with app.run_test() as pilot:
         dl = app.downloads
-        dl.items.extend(
-            [
-                DownloadItem("share/one.bin", Path("x"), status="queued"),
-                DownloadItem("share/running.bin", Path("x"), status="running"),
-            ]
-        )
+        running = DownloadItem("share/big.bin", Path("x"), size=100, downloaded=40,
+                               status="running")
+        waiting = DownloadItem("share/small.txt", Path("x"), status="queued")
+        dl.items.extend([running, waiting])
+
         await pilot.press("w")
-        app._panel_cursor = 1  # the running one
+        app._panel_cursor = 0  # the running one
+        await pilot.press("J")
+
+        assert [i.remote_path for i in dl.items] == ["share/small.txt", "share/big.bin"]
+        assert running.control == "yield"  # it stops at the next chunk boundary
+        assert "yields at 40%" in str(app.query_one("#status").render())
+        await pilot.press("q")
+
+
+async def test_pulling_one_up_past_the_running_transfer_preempts_it(make_app, tmp_path):
+    app = make_app(dict(TREE), download_root=tmp_path)
+    async with app.run_test() as pilot:
+        dl = app.downloads
+        running = DownloadItem("share/big.bin", Path("x"), size=100, status="running")
+        waiting = DownloadItem("share/small.txt", Path("x"), status="queued")
+        dl.items.extend([running, waiting])
+
+        await pilot.press("w")
+        app._panel_cursor = 1  # the queued one
         await pilot.press("K")
-        assert [i.remote_path for i in dl.items] == ["share/one.bin", "share/running.bin"]
+
+        assert [i.remote_path for i in dl.items] == ["share/small.txt", "share/big.bin"]
+        assert running.control == "yield"
+        await pilot.press("q")
+
+
+async def test_x_cancels_the_selected_transfer(make_app, tmp_path):
+    app = make_app(dict(TREE), download_root=tmp_path)
+    async with app.run_test() as pilot:
+        dl = app.downloads
+        item = DownloadItem("share/one.bin", Path("x"), status="queued")
+        dl.items.append(item)
+
+        await pilot.press("w")
+        app._panel_cursor = 0
+        await pilot.press("x")
+
+        assert item.status == "cancelled"
+        assert item in dl.items  # still listed, so you can see what happened
+        await pilot.press("q")
+
+
+async def test_x_clears_a_finished_entry(make_app, tmp_path):
+    app = make_app(dict(TREE), download_root=tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.press("l")
+        await pilot.press("a")  # grab the files here
+        await app.downloads.join()
+        await pilot.press("w")
+        assert app.downloads.items
+
+        for _ in range(len(app.downloads.items)):
+            app._panel_cursor = 0
+            await pilot.press("x")
+        assert app.downloads.items == []  # the list can be cleared entry by entry
+        await pilot.press("q")
+
+
+async def test_cancelling_a_running_download_stops_it_through_the_ui(
+    make_app, tmp_path, chunk_gate
+):
+    """End-to-end: a real transfer in flight, cancelled with 'x' from the panel."""
+    from smbex.download import CHUNK
+
+    big = b"B" * (CHUNK * 3)
+    app = make_app({"share": {"big.bin": big, "small.txt": b"hi"}}, download_root=tmp_path)
+    gate = chunk_gate(allow=1)
+    app._gateway._backend.read_gates["share/big.bin"] = gate
+
+    async with app.run_test() as pilot:
+        await pilot.press("l")
+        await pilot.press("a")  # queue both files
+        await gate.wait_until_held()  # big.bin is mid-transfer
+        await pilot.pause()
+
+        await pilot.press("w")
+        app._panel_cursor = [i.remote_path for i in app._panel_items()].index("share/big.bin")
+        await pilot.press("x")
+        gate.release()
+        await app.downloads.join()
+
+        cancelled = next(i for i in app.downloads.items if i.remote_path == "share/big.bin")
+        assert cancelled.status == "cancelled"
+        partial = (tmp_path / "share" / "big.bin").stat().st_size
+        assert 0 < partial < len(big)  # partial kept, so re-grabbing resumes
+        assert (tmp_path / "share" / "small.txt").read_bytes() == b"hi"  # queue moved on
         await pilot.press("q")
 
 

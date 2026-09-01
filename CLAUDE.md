@@ -20,7 +20,8 @@ a slow connection. Feature list (all implemented — phases 0–9 done):
 - **Background downloads** (single file / all files in current folder / recursive
   folder), replicating the remote tree locally — or **flat** (`--flat`): one folder
   per host, remote path folded into each filename. Task panel with progress, which
-  stays out of the way and can reprioritize the queue.
+  stays out of the way; transfers can be cancelled or reprioritized mid-flight
+  (pushing the running one down lets a small file through, then it resumes).
 - **Browsing has priority**: downloads are throttled to whatever bandwidth is left
   so navigation stays snappy, and **no keystroke ever waits on the wire** (cursor
   moves render from memory; side-column listings are fetched after a settle).
@@ -192,7 +193,7 @@ a slow connection. Feature list (all implemented — phases 0–9 done):
 > Status markers note: the current column carries a one-char status gutter
 > (`SmbexApp._entry_markers` → `Column.show(markers=...)`, styled in `columns.py`
 > `MARKER_STYLE`): `·` dir listing cached (`path in browser.cache`), `↓` queued/
-> downloading, `✓` downloaded, `✗` error. Folders aggregate the `DownloadManager.items`
+> downloading, `✓` downloaded, `✗` error, `⊘` cancelled part-way (partial on disk). Folders aggregate the `DownloadManager.items`
 > beneath them; files match their own `remote_path` — bucketed in **one pass** over the
 > download items (a per-entry scan was O(entries × downloads) on every repaint). Pure
 > render over in-memory state (no backend calls); re-rendered live on download progress
@@ -260,8 +261,37 @@ a slow connection. Feature list (all implemented — phases 0–9 done):
 > close. Reordering is why the queue *is* `items`: the worker takes the first entry
 > still `queued` (`_next_queued`), so swapping two queued entries changes what's next —
 > an `asyncio.Queue` plus a parallel display list could not express that. A `running`
-> item doesn't move (already on the wire) and says so. `join()` waits on `pending` via
-> the `_idle`/`_wake` events. Tested in `tests/test_ui_downloads.py`.
+> `join()` waits on `pending` via the `_idle`/`_wake` events.
+> Tested in `tests/test_ui_downloads.py`.
+
+> Interrupting a transfer note (cancel / deprioritize): both work **between chunks**
+> and cost nothing extra on the wire, because a download is already a sequence of
+> separate chunk jobs against a resumable partial file. `DownloadItem.control` is the
+> one-shot signal a *running* transfer reads at each chunk boundary
+> (`DownloadManager._download` → `_interrupt`): `"cancel"` → status `cancelled`,
+> `"yield"` → back to `queued` where it now sits in the list. Whatever was written
+> stays, so a yielded transfer resumes from those bytes on its next turn and a
+> cancelled one resumes if re-grabbed (`d`) — verified by asserting the second pass
+> re-opens at the partial offset, not 0.
+> * `cancel(item)` returns what it did — `"cancelled"` (queued: dropped before it ever
+>   opens the file), `"stopping"` (running) or `"cleared"` (a finished/errored entry,
+>   removed from the list). One key, `x`, covers "get rid of this".
+> * `reorder` now moves *pending* entries (not just queued ones) and enforces one
+>   invariant — **the wire belongs to the first pending entry** — via
+>   `_preempt_if_displaced()`. So `J` on the running transfer and `K` on the queued one
+>   behind it are the same operation from either side: the big file yields, the small
+>   one goes now. With nothing to swap with, `reorder` returns False and the UI says so.
+> Caveat: on **FTP** a handle closed before EOF drains the rest of the data connection
+> (see the Phase 9 note), so an interrupted FTP transfer still costs its remaining
+> bytes; SMB/SFTP close immediately. Tested in `tests/test_download_control.py`
+> (chunk-level `ChunkGate` fixture in conftest holds a transfer mid-file) plus the UI
+> wiring in `tests/test_ui_downloads.py`.
+
+> Status-note note: `_status_note` messages (copied, cancelled, yielded…) are held for
+> `SmbexApp.NOTE_SECONDS` (4 s) in `self._note` and re-rendered by `_update_status`.
+> Without the hold the very next repaint — download progress, or the panel refresh
+> that follows the action being reported — wiped the message before it could be read.
+> A link-state change clears the note, so the reconnect banner is never hidden.
 
 > File viewer note: `l`/`Enter`/`Right` on a **downloaded text** file opens the content
 > viewer (`SmbexApp._enter_file_view`, `_FileViewState`, `smbex/viewer.py` `LazyLines`).
@@ -318,8 +348,8 @@ Smaller items raised in discussion (not blocking):
 
 Actual keybindings today: `h/j/k/l`+arrows, `g`/`G`, `l`/`Enter` open, `h` up,
 `d` download selected (file, or folder recursively), `a` all files here, `w` task
-panel (then `j`/`k` select, `K`/`J` reprioritize a queued transfer, `w`/`h`/`Esc`
-close), `o` cycle sort (name→newest→oldest), `p` preload toggle (prefetches
+panel (then `j`/`k` select, `K`/`J` reprioritize — crossing the running transfer
+pauses it — `x` cancel/clear, `w`/`h`/`Esc` close), `o` cycle sort (name→newest→oldest), `p` preload toggle (prefetches
 surrounding folders), `r` reconnect (after a dropped link; auto only with
 `--auto-reconnect`), `t` translate toggle (English beside originals; needs
 `--translate <lang>`), `T` cycle colour theme (dark/light/nord/gruvbox),

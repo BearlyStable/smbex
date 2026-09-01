@@ -12,6 +12,12 @@ directly in ``root`` with its remote path folded into the name
 digging, and the origin still readable. Existing-file policy (default ``resume``): continue a partial file from where it
 stopped, and skip files already fully present; ``overwrite`` re-fetches; ``skip``
 never touches an existing path.
+
+Resume is also what makes a transfer **interruptible**: because every chunk is a
+separate job and the partial file is on disk, a running download can be cancelled
+(:meth:`cancel`) or pushed down the queue (:meth:`reorder`) *between chunks* — it
+stops, lets a smaller file behind it have the wire, and picks up from the bytes
+already written when its turn comes round again.
 """
 
 from __future__ import annotations
@@ -66,8 +72,11 @@ class DownloadItem:
     local_path: Path
     size: int = 0
     downloaded: int = 0
-    status: str = "queued"  # queued | running | done | skipped | error
+    status: str = "queued"  # queued | running | done | skipped | error | cancelled
     error: str = ""
+    #: Set by cancel()/reorder() on a *running* transfer; the chunk loop sees it
+    #: between chunks and stops there ("cancel" -> give up, "yield" -> requeue).
+    control: str = ""
 
     @property
     def progress(self) -> float:
@@ -129,7 +138,8 @@ class DownloadManager:
     # --- queue state ----------------------------------------------------------
     @property
     def pending(self) -> list[DownloadItem]:
-        """Transfers still to do — running first, then queued in priority order."""
+        """Transfers still to do, in queue order: the running one first (unless it has
+        just been displaced and is about to yield), then the queued ones."""
         return [it for it in self.items if it.status in ("running", "queued")]
 
     def _next_queued(self) -> DownloadItem | None:
@@ -139,26 +149,67 @@ class DownloadManager:
         return None
 
     def reorder(self, item: DownloadItem, delta: int) -> bool:
-        """Move a *queued* item one place up (-1) or down (+1) the queue.
+        """Move a pending transfer one place up (-1) or down (+1) the queue.
 
-        The worker always takes the first queued entry, so swapping two of them is
-        what changes priority. A running transfer doesn't move — it is already on
-        the wire — and finished entries are skipped over rather than swapped with.
+        The worker takes the first entry still ``queued``, so swapping two pending
+        entries is what changes priority. **Crossing the running transfer preempts
+        it**: the wire belongs to the first pending entry, so a running one that ends
+        up behind another is asked to yield — it stops at the next chunk boundary,
+        goes back to ``queued`` in its new place, and resumes from the bytes already
+        on disk when it comes round again. That is the "a 10 MB file is hogging the
+        link but I want the 5 KB text file now" case, from either side: push the big
+        one down, or pull the small one up.
+
+        Finished entries are skipped over rather than swapped with. Returns False if
+        the move isn't possible (nothing to swap with).
         """
-        if item.status != "queued" or not delta:
+        if item.status not in ("running", "queued") or not delta:
             return False
-        queued = [i for i, it in enumerate(self.items) if it.status == "queued"]
+        pending = [i for i, it in enumerate(self.items) if it.status in ("running", "queued")]
         try:
-            pos = queued.index(self.items.index(item))
+            pos = pending.index(self.items.index(item))
         except ValueError:
             return False
         target = pos + (1 if delta > 0 else -1)
-        if not 0 <= target < len(queued):
+        if not 0 <= target < len(pending):
             return False
-        here, there = queued[pos], queued[target]
+        here, there = pending[pos], pending[target]
         self.items[here], self.items[there] = self.items[there], self.items[here]
+        self._preempt_if_displaced()
         self._notify()
         return True
+
+    def _preempt_if_displaced(self) -> None:
+        """The wire belongs to the first pending entry: if the running transfer is no
+        longer it, ask it to yield (stop between chunks and requeue where it now is)."""
+        pending = self.pending
+        if not pending or pending[0].status == "running":
+            return
+        for item in pending[1:]:
+            if item.status == "running":
+                item.control = "yield"
+
+    def cancel(self, item: DownloadItem) -> str:
+        """Cancel a transfer, or clear an entry that has already finished.
+
+        Returns what happened: "cancelled" (a queued one, dropped before it starts),
+        "stopping" (a running one — it stops at the next chunk boundary) or "cleared"
+        (a finished/errored/cancelled entry, removed from the list). A cancelled
+        transfer keeps whatever it has already written, so re-grabbing it resumes
+        rather than starting over.
+        """
+        if item.status == "queued":
+            item.status = "cancelled"
+            self._notify()
+            return "cancelled"
+        if item.status == "running":
+            item.control = "cancel"
+            self._notify()
+            return "stopping"
+        if item in self.items:
+            self.items.remove(item)
+            self._notify()
+        return "cleared"
 
     def _notify(self) -> None:
         if self.on_change is not None:
@@ -242,7 +293,7 @@ class DownloadManager:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - record, keep the queue moving
-                item.status = "error"
+                item.status, item.control = "error", ""
                 item.error = str(exc)
             finally:
                 self._notify()
@@ -293,6 +344,21 @@ class DownloadManager:
                     self._notify()
                     if item.size and offset >= item.size:
                         break
+                    if item.control:  # cancelled or displaced: stop on this boundary
+                        return self._interrupt(item)
         finally:
+            # The handle is always closed, so the connection is never left mid-read.
+            # (On FTP a handle closed before EOF drains the rest of the data
+            # connection — see the backend — so an interrupted FTP transfer still
+            # costs its remaining bytes. SMB/SFTP close immediately.)
             await self.gateway.close_file(remote, priority=Priority.DOWNLOAD)
-        item.status = "done"
+        item.status, item.control = "done", ""  # a late cancel on a finished file is moot
+
+    def _interrupt(self, item: DownloadItem) -> None:
+        """Leave a running transfer at a chunk boundary — for good, or for now.
+
+        Whatever has been written stays on disk, so "yield" resumes from there when
+        the item's turn comes round again and "cancel" resumes if it is re-grabbed.
+        """
+        item.status = "cancelled" if item.control == "cancel" else "queued"
+        item.control = ""

@@ -110,6 +110,46 @@ def settle():
     return _settle
 
 
+class ChunkGate:
+    """A ``FakeBackend.read_gates`` entry that holds a transfer mid-file.
+
+    Lets ``allow`` chunk reads through, then blocks in the backend thread until
+    released — so a test can interrupt a download at a known chunk boundary instead
+    of racing it to completion.
+    """
+
+    def __init__(self, allow: int = 1):
+        self.allow = allow
+        self.held = threading.Event()  # a read is being held right now
+        self.go = threading.Event()  # released
+
+    def wait(self) -> None:  # called on the gateway's worker thread
+        if self.allow > 0:
+            self.allow -= 1
+            return
+        self.held.set()
+        self.go.wait()
+
+    def release(self) -> None:
+        self.go.set()
+
+    async def wait_until_held(self, timeout: float = 5.0) -> None:
+        """Await the moment a chunk read is actually being held."""
+        import asyncio
+
+        deadline = asyncio.get_running_loop().time() + timeout
+        while not self.held.is_set():
+            if asyncio.get_running_loop().time() > deadline:
+                raise AssertionError("no chunk read was held")
+            await asyncio.sleep(0.01)
+
+
+@pytest.fixture
+def chunk_gate():
+    """Factory: ``chunk_gate(allow=1)`` — holds a download at a chunk boundary."""
+    return ChunkGate
+
+
 class FakeTranslator:
     """Deterministic stand-in satisfying smbex.translate.Translator, offline.
 

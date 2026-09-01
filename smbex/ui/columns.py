@@ -60,6 +60,7 @@ MARKER_STYLE = {
     "↓": "yellow",     # queued / downloading
     "✓": "green",      # downloaded / complete
     "✗": "bold red",   # download error
+    "⊘": "dim yellow", # download cancelled part-way (partial file kept)
     "·": "dim",        # listing already cached
 }
 

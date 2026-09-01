@@ -117,8 +117,16 @@ into the one per-host folder with the remote path folded into each name
 The task panel stays out of the way: it appears only while transfers are in flight,
 lists just those, and disappears when they finish (`--download-panel hidden` keeps it
 off screen entirely; the status bar always shows `dl:3/12 ↓47%`). `w` opens the full
-list — there `j`/`k` select a transfer and `K`/`J` move a queued one up or down the
-queue to change what is fetched next; `w`/`h`/`Esc` close it.
+list — there `j`/`k` select a transfer, `K`/`J` move it up or down the queue and `x`
+cancels it (or clears a finished entry); `w`/`h`/`Esc` close it.
+
+Reordering can preempt: moving a transfer past the one that's running makes the
+running one **yield the wire at the next chunk boundary** and resume later from the
+bytes already on disk — so when a 10 MB file is hogging a slow link and you want the
+5 KB text file now, press `J` on the big one (or `K` on the small one). Cancelling
+keeps the partial file too, so grabbing it again with `d` resumes rather than
+restarting. (On FTP, a transfer stopped early still drains its remaining bytes — see
+*Protocol fidelity* below; SMB and SFTP stop immediately.)
 
 Optional extras: `--preload` prefetches surrounding folders (toggle with `p`);
 `--translate <lang>` shows English filename translations beside the originals
