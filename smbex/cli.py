@@ -170,6 +170,14 @@ def build_parser() -> argparse.ArgumentParser:
         "of downloading (offline model setup)",
     )
     ui.add_argument(
+        "--flat",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="save downloads flat: one folder per host, with the remote path folded "
+        "into each filename (share/2024/report.pdf -> share_2024_report.pdf) instead "
+        "of recreating the remote tree",
+    )
+    ui.add_argument(
         "--download-dir",
         metavar="DIR",
         default="downloads",
@@ -259,6 +267,7 @@ def _run_mux(args, translator) -> int:
         start_path=backend.start_rel,
         preload=args.preload,
         label=f"mux:{backend.label}",
+        flat=args.flat,
         download_root=Path(args.download_dir) / _safe(backend.host or "mux"),
         translator=translator,
         sort=args.sort,
@@ -348,6 +357,7 @@ def main(argv: list[str] | None = None) -> int:
             start_path=getattr(backend, "start_rel", ""),
             preload=args.preload,
             label=args.target,
+            flat=args.flat,
             download_root=Path(args.download_dir) / _safe(host),
             translator=translator,
             sort=args.sort,
@@ -375,6 +385,7 @@ def main(argv: list[str] | None = None) -> int:
         Gateway(backend, auto_reconnect=args.auto_reconnect),
         preload=args.preload,
         label=args.target,
+        flat=args.flat,
         download_root=Path(args.download_dir) / _safe(smb.host),
         translator=translator,
         sort=args.sort,

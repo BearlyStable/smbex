@@ -114,6 +114,7 @@ class SmbexApp(App):
         preload: bool = False,
         label: str = "",
         download_root: Path | str = "downloads",
+        flat: bool = False,
         translator: Translator | None = None,
         sort: str = "name",
         theme: str = "dark",
@@ -127,7 +128,7 @@ class SmbexApp(App):
         self._show_preview = show_preview
         self.browser = Browser(gateway, preload=preload)
         self.browser.sort_mode = SORT_BY_LABEL.get(sort, "name")  # initial view sort
-        self._downloads = DownloadManager(gateway, Path(download_root))
+        self._downloads = DownloadManager(gateway, Path(download_root), flat=flat)
         self._start_path = start_path
         self._label = label
         self._translator = translator

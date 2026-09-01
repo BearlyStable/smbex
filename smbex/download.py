@@ -5,8 +5,11 @@ chunks through the gateway at DOWNLOAD priority. Because every chunk is a separa
 low-priority gateway job, a queued browse request is served between chunks —
 browsing stays responsive and downloads take only the leftover bandwidth.
 
-The remote tree is mirrored locally under ``root`` (``root / share / dir / file``).
-Existing-file policy (default ``resume``): continue a partial file from where it
+Two local layouts (``flat=False|True``): the remote tree is **mirrored** under
+``root`` (``root / share / dir / file``), or **flattened** so every file lands
+directly in ``root`` with its remote path folded into the name
+(``share/2024/report.pdf`` -> ``share_2024_report.pdf``) — one folder per host, no
+digging, and the origin still readable. Existing-file policy (default ``resume``): continue a partial file from where it
 stopped, and skip files already fully present; ``overwrite`` re-fetches; ``skip``
 never touches an existing path.
 """
@@ -14,6 +17,7 @@ never touches an existing path.
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
@@ -21,6 +25,39 @@ from typing import Callable, Iterable
 from smbex.gateway import Gateway, Priority
 
 CHUNK = 256 * 1024
+
+#: Joins the remote path's components in a flat filename.
+FLAT_SEP = "_"
+#: Marks a de-duplication counter — deliberately *not* FLAT_SEP, so "a~2.txt" can
+#: never be confused with a real remote component named "2".
+DEDUPE_SEP = "~"
+#: Path separators, control characters and the chars that aren't portable in a
+#: filename (Windows/SMB/exFAT); everything else, incl. non-ASCII, is kept as-is.
+_UNSAFE = re.compile(r'[\x00-\x1f<>:"|?*\\/]')
+
+
+def _fit(name: str, max_bytes: int) -> str:
+    """Truncate to ``max_bytes`` *bytes* (not characters — a filesystem limit is in
+    bytes and CJK names are 3 bytes a character), keeping the extension."""
+    if len(name.encode()) <= max_bytes:
+        return name
+    stem, dot, ext = name.rpartition(".")
+    if not dot or len(ext) > 16:  # no usable extension: truncate the whole name
+        stem, dot, ext = name, "", ""
+    keep = max(1, max_bytes - len(f"{dot}{ext}".encode()))
+    stem = stem.encode()[:keep].decode(errors="ignore")  # drop a split character
+    return f"{stem}{dot}{ext}"
+
+
+def flat_name(remote_path: str, *, max_bytes: int = 200) -> str:
+    """The single filename encoding a whole remote path, for the flat layout.
+
+    ``share/2024/report.pdf`` -> ``share_2024_report.pdf``. Left under a 255-byte
+    filesystem limit with room for a ``~N`` de-duplication suffix.
+    """
+    parts = [p for p in remote_path.replace("\\", "/").split("/") if p and p != ".."]
+    name = FLAT_SEP.join(_UNSAFE.sub("_", part) for part in parts)
+    return _fit(name or "download", max_bytes)
 
 
 @dataclass
@@ -48,12 +85,19 @@ class DownloadManager:
         root: Path | str,
         *,
         exists_policy: str = "resume",
+        flat: bool = False,
         on_change: Callable[[], None] | None = None,
     ):
         self.gateway = gateway
         self.root = Path(root)
         self.exists_policy = exists_policy
+        self.flat = flat
         self.on_change = on_change
+        # Flat layout only: local path <-> remote path, so a name is assigned once
+        # (stable for resume and for the preview's "is this downloaded?" lookup) and
+        # two different remote paths can never land on the same file.
+        self._assigned: dict[str, Path] = {}
+        self._claimed: dict[Path, str] = {}
         self.items: list[DownloadItem] = []
         self._queue: "asyncio.Queue[DownloadItem]" = asyncio.Queue()
         self._worker: asyncio.Task | None = None
@@ -82,8 +126,38 @@ class DownloadManager:
 
     # --- enqueueing -----------------------------------------------------------
     def _local_for(self, remote_path: str) -> Path:
-        parts = [p for p in remote_path.replace("\\", "/").split("/") if p]
-        return self.root.joinpath(*parts)
+        """Where ``remote_path`` is stored locally — mirrored, or flattened into one
+        per-host folder. Deterministic per remote path, so re-grabbing a file resumes
+        it instead of writing a second copy."""
+        if not self.flat:
+            parts = [p for p in remote_path.replace("\\", "/").split("/") if p]
+            return self.root.joinpath(*parts)
+        local = self._assigned.get(remote_path)
+        if local is None:
+            local = self._claim(self.root / flat_name(remote_path), remote_path)
+            self._assigned[remote_path] = local
+        return local
+
+    def _claim(self, candidate: Path, remote_path: str) -> Path:
+        """Reserve ``candidate`` for ``remote_path``, numbering on a clash.
+
+        Only a clash with *another remote path* is numbered — an existing file on
+        disk for the same remote path is the whole point of resume, so it is kept.
+        Flattening makes clashes rare but possible ('a/b_c' and 'a_b/c' fold alike).
+        """
+        owner = self._claimed.get(candidate)
+        if owner is None or owner == remote_path:
+            self._claimed[candidate] = remote_path
+            return candidate
+        stem, dot, ext = candidate.name.rpartition(".")
+        if not dot or len(ext) > 16:
+            stem, dot, ext = candidate.name, "", ""
+        for n in range(2, 10_000):
+            numbered = candidate.with_name(f"{stem}{DEDUPE_SEP}{n}{dot}{ext}")
+            if self._claimed.get(numbered) in (None, remote_path):
+                self._claimed[numbered] = remote_path
+                return numbered
+        raise RuntimeError(f"cannot find a free local name for {remote_path}")
 
     async def add_file(self, remote_path: str, size: int = 0) -> DownloadItem:
         item = DownloadItem(remote_path, self._local_for(remote_path), size)
