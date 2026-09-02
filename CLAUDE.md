@@ -457,11 +457,49 @@ python3 -m venv .venv
 .venv/bin/python -m smbex --help              # ends with the QUICKSTART epilog (cli.QUICKSTART)
 ```
 
-**Release**: `bash scripts/make_release.sh` writes `dist/smbex.pyz` (single-file
+**Local artifacts**: `bash scripts/make_release.sh` writes `dist/smbex.pyz` (single-file
 zipapp; bundles only smbex's pure-Python code — deps stay apt/pip on the target),
 `dist/smbex-<ver>.tar.gz` (source), and `dist/QUICKSTART.txt`. `smbex --help`'s
 epilog is `cli.QUICKSTART` (connect / config / one-time translation-model setup with
 the Argos index URL) — a single source of truth reused by the release script.
+
+## Publishing a release
+
+This is the agreed procedure — follow it end to end when asked to release, and don't
+invent a different one. Publishing is irreversible (a PyPI version can be yanked but
+never reused), so the pre-flight is not optional.
+
+1. **Pre-flight.** Full suite green (`.venv/bin/python -m pytest -q`, 0 skips — stop
+   the demo server first, it squats port 4455 that the SMB tests need). Then
+   `rm -rf dist build && .venv/bin/python -m build && .venv/bin/python -m twine check
+   dist/*`, and install the built wheel into a throwaway venv (`pip install --no-deps
+   dist/*.whl`) to confirm `smbex --version` and the console entry point.
+2. **Version.** Bump `__version__` in `smbex/__init__.py` — the package version is read
+   from it. Minor bump for features or a visible behaviour change, patch for fixes;
+   pre-1.0, breaking-ish changes still go in a minor. PyPI refuses a re-upload, so the
+   version must be new.
+3. **Tag and push.** Commit the bump, `git push origin main`, then `git tag -a vX.Y.Z
+   -m "smbex X.Y.Z" && git push origin vX.Y.Z`. The tag push triggers
+   `.github/workflows/release.yml`, which builds and uploads to PyPI over **Trusted
+   Publishing (OIDC)** — there is no API token anywhere, don't add one and never
+   `twine upload` by hand.
+4. **Verify it actually landed** — a green workflow is not proof. Check the publish
+   step's log for the upload lines, then `pip install smbex==X.Y.Z` into a throwaway
+   venv and run `smbex --version`. PyPI's JSON API caches for a minute or two, so it
+   can still report the old version right after a successful upload; the install is
+   the real check.
+5. **GitHub release.** `gh release create vX.Y.Z --title "smbex X.Y.Z" --notes-file …
+   --verify-tag`. Write the notes for someone deciding whether to upgrade: what is new
+   and why it matters, a real example (paste actual output, not invented output), and
+   an **Upgrading** section whenever a default or a key changed. End with the
+   `compare/vPREV...vX.Y.Z` link.
+6. **Attach the zipapp.** `bash scripts/make_release.sh` (it rebuilds `dist/`), then
+   `gh release upload vX.Y.Z dist/smbex.pyz dist/QUICKSTART.txt`, and append a **Files**
+   section to the notes with a `curl` line and `sha256sum` for each. Download the
+   published asset back and check the hash. Do **not** attach
+   `dist/smbex-<ver>.tar.gz`: make_release's source tarball shares a filename with the
+   PyPI sdist without being the same bytes, and two different files under one name
+   across two channels is a trap.
 
 ## Architecture
 
