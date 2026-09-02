@@ -156,7 +156,22 @@ python3 -m smbex --translate ja --flat --preload --save-config
 ```
 
 Keys: `preload`, `auto_reconnect`, `sort`, `theme`, `parent`, `preview`, `translate`,
-`download_dir`, `download_panel`, `flat`.
+`download_dir`, `download_panel`, `flat`, `index`.
+
+`--index FILE` writes down everything you browse past — one tab-separated line per
+file or folder (path, type, exact size in bytes, mtime, plus the English name while
+translation is on) — so you can hand the result to an AI agent and ask which files
+look interesting:
+
+```sh
+smbex --index seen.tsv 'DOMAIN/user@host'
+```
+
+It is fed only from listings the session was already fetching, so it **adds no
+network traffic** and cannot walk anywhere you didn't go; a folder is written once,
+and pointing later runs at the same file accumulates instead of repeating. This is
+the one thing smbex persists to disk — the listing cache itself stays session-only —
+so it happens only when you ask for it by name.
 
 `smbex --help` ends with a **quickstart** covering connecting, the config file, and
 the one-time translation-model setup (with the model index URL).

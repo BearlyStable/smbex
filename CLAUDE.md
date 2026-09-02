@@ -297,6 +297,26 @@ a slow connection. Feature list (all implemented — phases 0–9 done):
 > (chunk-level `ChunkGate` fixture in conftest holds a transfer mid-file) plus the UI
 > wiring in `tests/test_ui_downloads.py`.
 
+> Index note (`--index FILE`, config `index`): an append-only TSV of every entry the
+> session saw — `path\ttype\tsize\tmtime` plus an optional English column while
+> translation is on (`smbex/index.py`, `ListingIndex`). Meant to be handed to an AI
+> agent ("which of these look interesting?"), so the format is token-cheap and
+> greppable; sizes are exact bytes and a directory's size is `-`, never a misleading
+> `0`. **It cannot cause traffic**: the only feed is `Gateway.on_listing`, called
+> after a listing the session was already fetching (browse, preload, *and* a recursive
+> download's enumeration — all of which pass through `Gateway.list`/`roots`). A folder
+> served from the session cache never reaches the gateway, so a revisit neither costs
+> a request nor writes a duplicate line. Opened lazily (an empty session leaves no
+> file), flushed per listing (a crash keeps what it saw), and primed from the existing
+> file *before* the first write so successive runs against one file accumulate instead
+> of repeating — priming at open time was the first cut and silently deduped nothing.
+> Names are escaped (`\t`/`\n`/`\r`/`\`; POSIX names may contain all of them) and any
+> write error is swallowed: the index is a side-effect, never the job. This is the one
+> place smbex persists listing data — the cache itself stays session-only (Key
+> decisions), so it is opt-in by name and off unless asked for. Tested in
+> `tests/test_index.py` (incl. "the same browse with and without `--index` hits the
+> backend identically") plus a live-SMB case in `tests/test_ui_integration.py`.
+
 > Status-note note: `_status_note` messages (copied, cancelled, yielded…) are held for
 > `SmbexApp.NOTE_SECONDS` (4 s) in `self._note` and re-rendered by `_update_status`.
 > Without the hold the very next repaint — download progress, or the panel refresh

@@ -68,3 +68,32 @@ async def test_flat_download_and_task_panel_over_real_smb(smb_server, tmp_path):
         assert not panel.has_class("hidden")
         assert "inner.bin" in panel.rendered_text
         await pilot.press("q")
+
+
+async def test_index_records_a_real_browse(smb_server, tmp_path):
+    """--index over the real backend: what was listed is on file, nothing else."""
+    out = tmp_path / "seen.tsv"
+    auth = build_smb_auth(f"smbex:smbex@{smb_server['host']}", port=smb_server["port"])
+    app = SmbexApp(Gateway(ImpacketBackend.connect(auth)), label="smb", index_path=out)
+
+    async with app.run_test() as pilot:
+        share = smb_server["share"]
+        browser = app.browser
+        browser.move_to([e.name for e in browser.entries].index(share))
+        await pilot.press("l")  # into the share
+        await app.wait_for_side_refresh()
+        await pilot.pause()
+        await pilot.press("q")
+
+    rows = [
+        line.split("\t")
+        for line in out.read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    ]
+    by_path = {r[0]: r for r in rows}
+    assert f"/{share}" in by_path and by_path[f"/{share}"][1] == "dir"
+    assert by_path[f"/{share}/hello.txt"][1:3] == ["file", str(len(b"hello smb"))]
+    assert by_path[f"/{share}/sub"][1:3] == ["dir", "-"]
+    # sub/ was previewed (so listed) but its contents only appear if it was opened;
+    # nothing under a folder the session never listed may show up.
+    assert all(not p.startswith(f"/{share}/sub/sub") for p in by_path)

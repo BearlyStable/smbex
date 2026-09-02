@@ -58,6 +58,11 @@ class Gateway:
         self._connection_lost = False
         #: Called with "reconnecting" / "connected" / "disconnected" on link changes.
         self.on_status = on_status
+        #: Called with (path, entries) after every listing that actually went to the
+        #: backend — browse, preload, and a recursive download's enumeration alike.
+        #: A listing served from the session cache never gets here, so an observer
+        #: sees each folder once and can never cause a fetch (see smbex/index.py).
+        self.on_listing: Callable[[str, list[DirEntry]], None] | None = None
         self._reconnect_attempts = reconnect_attempts
         self._reconnect_delay = reconnect_delay
 
@@ -193,10 +198,21 @@ class Gateway:
 
     # --- public API -----------------------------------------------------------
     async def roots(self, priority: int = Priority.BROWSE) -> list[DirEntry]:
-        return await self._submit(priority, self._backend.roots)
+        return self._observe("", await self._submit(priority, self._backend.roots))
 
     async def list(self, path: str, priority: int = Priority.BROWSE) -> list[DirEntry]:
-        return await self._submit(priority, lambda: self._backend.list(path))
+        return self._observe(
+            path, await self._submit(priority, lambda: self._backend.list(path))
+        )
+
+    def _observe(self, path: str, entries: list[DirEntry]) -> list[DirEntry]:
+        """Hand a freshly fetched listing to ``on_listing`` and pass it through."""
+        if self.on_listing is not None:
+            try:
+                self.on_listing(path, entries)
+            except Exception:
+                pass  # an observer must never break the listing it is watching
+        return entries
 
     async def stat(self, path: str, priority: int = Priority.BROWSE) -> DirEntry:
         return await self._submit(priority, lambda: self._backend.stat(path))

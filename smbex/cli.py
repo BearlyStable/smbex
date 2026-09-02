@@ -35,7 +35,7 @@ Config file (your defaults; command-line flags still override it):
   smbex --translate ja --flat --preload --save-config
                                         saves the options you just used as defaults
   keys: preload, auto_reconnect, sort, theme, parent, preview, translate,
-        download_dir, download_panel, flat
+        download_dir, download_panel, flat, index
 
 Offline filename translation (optional; runs entirely on this machine):
   1. engine (once):   pip install ctranslate2 sentencepiece
@@ -189,6 +189,14 @@ def build_parser() -> argparse.ArgumentParser:
         "of recreating the remote tree",
     )
     ui.add_argument(
+        "--index",
+        metavar="FILE",
+        help="append everything browsing sees (path, type, size, mtime — plus the "
+        "English name while translation is on) to FILE, one line per entry. Fed only "
+        "from listings already being fetched, so it adds no network traffic; a folder "
+        "is recorded once, and successive runs against the same file accumulate.",
+    )
+    ui.add_argument(
         "--download-panel",
         choices=("auto", "hidden"),
         default="auto",
@@ -288,6 +296,7 @@ def _run_mux(args, translator) -> int:
         label=f"mux:{backend.label}",
         flat=args.flat,
         download_panel=args.download_panel,
+        index_path=args.index,
         download_root=Path(args.download_dir) / _safe(backend.host or "mux"),
         translator=translator,
         sort=args.sort,
@@ -389,6 +398,7 @@ def main(argv: list[str] | None = None) -> int:
             label=args.target,
             flat=args.flat,
             download_panel=args.download_panel,
+            index_path=args.index,
             download_root=Path(args.download_dir) / _safe(host),
             translator=translator,
             sort=args.sort,
@@ -418,6 +428,7 @@ def main(argv: list[str] | None = None) -> int:
         label=args.target,
         flat=args.flat,
         download_panel=args.download_panel,
+        index_path=args.index,
         download_root=Path(args.download_dir) / _safe(smb.host),
         translator=translator,
         sort=args.sort,

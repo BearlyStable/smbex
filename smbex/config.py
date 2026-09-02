@@ -19,7 +19,7 @@ from pathlib import Path
 
 # Keys mirrored to argparse dests; the rest are treated as strings.
 _BOOL_KEYS = ("preload", "auto_reconnect", "parent", "preview", "flat")
-_STR_KEYS = ("translate", "sort", "theme", "download_dir", "download_panel")
+_STR_KEYS = ("translate", "sort", "theme", "download_dir", "download_panel", "index")
 
 #: Built-in defaults, mirrored from the argparse defaults in cli.build_parser().
 DEFAULTS: dict = {
@@ -33,6 +33,7 @@ DEFAULTS: dict = {
     "download_dir": "downloads",
     "download_panel": "auto",
     "flat": False,
+    "index": "",
 }
 
 #: One template for both ``--write-config`` (defaults) and ``--save-config`` (the
@@ -70,6 +71,10 @@ download_dir = {download_dir}
 
 # Task panel:  auto (appear only while transfers run) | hidden (only on 'w').
 download_panel = {download_panel}
+
+# Record every file/folder browsing sees into this TSV file (blank = off).
+# Costs no extra network traffic — it only writes down listings already fetched.
+index = {index}
 
 # Save downloads flat (true/false): one folder per host, the remote path folded
 # into each filename (share/2024/report.pdf -> share_2024_report.pdf).

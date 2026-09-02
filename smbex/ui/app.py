@@ -123,6 +123,7 @@ class SmbexApp(App):
         sort: str = "name",
         theme: str = "dark",
         download_panel: str = "auto",
+        index_path: str | Path | None = None,
         show_parent: bool = True,
         show_preview: bool = True,
     ):
@@ -151,6 +152,13 @@ class SmbexApp(App):
         self._side_ack = 0  # ... and finished ones (equal == nothing pending)
         self._dl_paint = (0.0, ())  # last download repaint: (time, status signature)
         self._note: tuple[str, float] | None = None  # transient status-bar message
+        # --index: record what browsing sees. Fed by the gateway from listings that
+        # were fetched anyway, so it never adds a request of its own.
+        self._index = None
+        if index_path:
+            from smbex.index import ListingIndex
+
+            self._index = ListingIndex(index_path, target=label, translate=self._index_name)
         self._view: _FileViewState | None = None  # set while a file's content is open
 
     @property
@@ -172,6 +180,8 @@ class SmbexApp(App):
         self.query_one("#parent", Column).set_class(not self._show_parent, "hidden")
         self.query_one("#preview", Column).set_class(not self._show_preview, "hidden")
         self._gateway.on_status = self._on_conn_status  # surface reconnect state
+        if self._index is not None:
+            self._gateway.on_listing = self._index.add  # record listings as they land
         self.browser.preloader.on_warm = self._on_preload_warm  # live cached-marker
         await self._gateway.start()
         self._downloads.on_change = self._on_downloads_change
@@ -185,6 +195,8 @@ class SmbexApp(App):
 
     async def on_unmount(self) -> None:
         self.workers.cancel_group(self, "side")  # deferred column fetches
+        if self._index is not None:
+            self._index.close()
         await self._downloads.stop()  # stop before the gateway it depends on
         await self.browser.preloader.stop()  # cancel prefetches before the gateway
         await self._gateway.stop()
@@ -345,6 +357,16 @@ class SmbexApp(App):
         if not (self.translate_enabled and self._translator and self._translator.available):
             return None
         return [translate_name(self._translator, e.name, e.is_dir) for e in entries]
+
+    def _index_name(self, name: str, is_dir: bool) -> str | None:
+        """English rendering for the index's optional column, when translation is on.
+
+        Local inference only — like every other translate call, it never leaves the
+        machine, and it is skipped entirely while the 't' toggle is off.
+        """
+        if not (self.translate_enabled and self._translator and self._translator.available):
+            return None
+        return translate_name(self._translator, name, is_dir)
 
     def _name_translation(self, entry) -> str | None:
         if entry is None or not (
