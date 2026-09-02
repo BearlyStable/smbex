@@ -5,8 +5,8 @@ A terminal (TUI) explorer for remote hosts over **SMB**, **SSH/SFTP**, and
 cache, background downloads that yield to browsing, folder preloading, and offline
 filename translation.
 
-> Status: **foundation** in progress. See [CLAUDE.md](CLAUDE.md) for the full
-> architecture, roadmap, and hand-off notes.
+> Status: feature-complete (all planned phases done). See [CLAUDE.md](CLAUDE.md)
+> for the architecture, design notes, and backlog.
 
 ## Install
 
